@@ -12,6 +12,10 @@
 #define SET_FALLING EICRA=(1<<ISC01);	//set interrupt at falling edge
 #define SET_LEVEL EICRA=0; //set interrupt at low level
 #define CHK_INT_EN (EIMSK&(1<<INT0))==(1<<INT0)	//test if interrupt enabled
+<<<<<<< HEAD
+=======
+#define PIN_INT ISR(INT0_vect)	// the interrupt service routine
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 //Timer Interrupt
 #define EN_TIMER {TIMSK0 |= (1<<TOIE0); TIFR0|=(1<<TOV0);}	//enable timer interrupt
@@ -38,6 +42,7 @@
 	TIMSK0=0; \
 	EIMSK=(1<<INT0); \
 	TCCR0B=(1<<CS00)|(1<<CS01);
+<<<<<<< HEAD
 
 #define PINOUT PINC
 
@@ -46,6 +51,19 @@
 #define RING 0 /* PC2 */
 #define RINGIN 7 /* PB1 */
 #define BTNIN 6 /* PB0 */
+=======
+
+#define PINOUT PINC
+#define LED _BV (PC1)
+#define LAMP _BV (PC2)
+
+#define LED_OFF()	PORTC |= LED
+#define LED_ON()	PORTC &= ~(LED)
+#define LAMP_OFF()	PORTC |= LAMP
+#define LAMP_ON()	PORTC &= ~(LAMP)
+
+#define PININ PINB
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 #ifdef HAVE_UART
 #include "uart.h"

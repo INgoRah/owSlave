@@ -14,6 +14,7 @@
 #	define SYSCLOCK  8000000  // main internal
 #endif
 
+#ifdef IR_SENDER
 // PWM, Phase Correct, TOP OCRA, 
 // no prescaler (CS20=1)
 #define TIMER_ENABLE_PWM     (TCCR0A |= _BV(COM0B1))

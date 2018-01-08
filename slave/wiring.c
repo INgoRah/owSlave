@@ -89,7 +89,10 @@ const uint8_t PROGMEM digital_pin_to_bit_mask_PGM[] = {
 	NOT_A_PIN	, //			#4
 	NOT_A_PIN	, //			#5
 	_BV( PB0 )	, // BTN		#6
+<<<<<<< HEAD
 	_BV( PB5 )	, // BTN		#7
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 #else
 	_BV( 2 )	, // PC 2 ** LAMP	#0
 	_BV( 1 )	, // PC 1 ** LED	#1
@@ -135,9 +138,19 @@ const uint8_t PROGMEM digital_pin_to_bit_mask_PGM[] = {
 
 volatile unsigned long timer1_overflow_count = 0;
 volatile unsigned long timer1_millis = 0;
+<<<<<<< HEAD
 /*static*/ unsigned char timer1_fract = 0;
 
 ISR(TIMER1_OVF_vect)
+=======
+static unsigned char timer1_fract = 0;
+
+#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny85__)
+ISR(TIM1_OVF_vect)
+#else
+ISR(TIMER1_OVF_vect)
+#endif
+>>>>>>> Version Update with more decent commands and ATMEGA support
 {
 	// copy these to local variables so they can be stored in registers
 	// (volatile variables must be read from memory on every access)
@@ -176,7 +189,17 @@ unsigned long micros() {
 	
 	cli();
 	m = timer1_overflow_count;
+<<<<<<< HEAD
 	t = TCNT1;
+=======
+#if defined(TCNT1L)
+	t = TCNT1;
+#elif defined(TCNT1)
+	t = TCNT1;
+#else
+	#error timer 1 not defined
+#endif
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 #ifdef TIFR1
 	if ((TIFR1 & _BV(TOV1)) && (t < 255))
@@ -203,7 +226,10 @@ void delay(unsigned long ms)
 	}
 }
 
+<<<<<<< HEAD
 #if 0 // seems not yet be working, endless loop?
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 /* Delay for the given number of microseconds.  Assumes a 1, 8, 12, 16, 20 or 24 MHz clock. */
 void delayMicroseconds(unsigned int us)
 {
@@ -271,13 +297,20 @@ void delayMicroseconds(unsigned int us)
 	);
 	// return = 4 cycles
 }
+<<<<<<< HEAD
 #endif
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 int digitalRead(uint8_t pin)
 {
 	uint8_t bit = digitalPinToBitMask(pin);
 #if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
+<<<<<<< HEAD
 	if (PINB & bit)
+=======
+	if (PINB & _BV(bit))
+>>>>>>> Version Update with more decent commands and ATMEGA support
 #else
 	uint8_t port = digitalPinToPort(pin);
 
@@ -323,6 +356,10 @@ void pinMode(uint8_t pin, uint8_t mode)
 
 void digitalWrite(uint8_t pin, uint8_t val)
 {
+<<<<<<< HEAD
+=======
+	//uint8_t oldSREG = SREG;
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	uint8_t bit;
 	volatile uint8_t *out;
 	
@@ -334,13 +371,23 @@ void digitalWrite(uint8_t pin, uint8_t val)
 	if (port == NOT_A_PIN) return;
 	out = portOutputRegister(port);
 #endif
+<<<<<<< HEAD
+=======
+	//cli();
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	if (val == LOW)
 		*out &= ~bit;
 	else
 		*out |= bit;
+<<<<<<< HEAD
 }
 
 #if 0
+=======
+	//SREG = oldSREG;
+}
+
+>>>>>>> Version Update with more decent commands and ATMEGA support
 static const uint8_t analog_reference = 0;
 #define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
 
@@ -387,7 +434,10 @@ int analogRead(uint8_t pin)
 	// combine the two bytes
 	return (high << 8) | low;
 }
+<<<<<<< HEAD
 #endif
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 void init()
 {
@@ -395,17 +445,28 @@ void init()
 	// work there
 	sei();
 	
+<<<<<<< HEAD
 	// set TOV on TOP=0xFF, 8 bit fast PWM mode, clear on match
 	// (WGM12 or CTC)
 #if defined(TCCR1A) && defined(WGM11)
 	// this combination is for the standard 88/168/328/1280/2560
+=======
+#if defined(TCCR1A) && defined(WGM11)
+	// this combination is for the standard 88/168/328/1280/2560
+	// set TOV on TOP=0xFF, 8 bit fast PWM mode
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	sbi(TCCR1B, WGM12); // for timer 0 force 8 bit
 	sbi(TCCR1A, WGM10);
 #endif
 	// set timer 1 prescale factor to 64
 #if defined(TCCR1) && defined(CS11) && defined(CS10)
 	// this combination is for the standard atmega8 / attiny85
+<<<<<<< HEAD
 	TCCR1 = _BV(PWM1A) | _BV(CS12) | _BV(CS11) | _BV(CS10);
+=======
+	sbi(TCCR1, CS11);
+	sbi(TCCR1, CS10);
+>>>>>>> Version Update with more decent commands and ATMEGA support
 #elif defined(TCCR1B) && defined(CS11) && defined(CS10)
 	// this combination is for the standard 88/168/328/1280/2560
 	sbi(TCCR1B, CS11);
@@ -415,10 +476,14 @@ void init()
 #endif
 	// enable timer 1 overflow interrupt
 #if defined(TIMSK) && defined(TOIE1)
+<<<<<<< HEAD
 	OCR1C = 0xff;
 	sbi(TIFR, TOV1);
 	sbi(TIMSK, TOIE1);
 
+=======
+	sbi(TIMSK, TOIE1);
+>>>>>>> Version Update with more decent commands and ATMEGA support
 #elif defined(TIMSK1) && defined(TOIE1)
 	sbi(TIMSK1, TOIE1);
 #else

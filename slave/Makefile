@@ -63,6 +63,7 @@ ifeq ($(TARGET), attiny85)
 # HFUSE=0xdf LFUSE=0xb2 ???
 LFUSE=0xd2
 HFUSE=0xdf
+DEFS+=-DIR_SENDER
 endif
 
 ifeq ($(UART), 1)

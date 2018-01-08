@@ -21,6 +21,7 @@
 // http://www.tm3d.de/index.php/
 #include "Arduino.h"
 #include "owflexdev.h"
+<<<<<<< HEAD
 #ifdef HAVE_UART
 #include "uart.h"
 #include "printf.h"
@@ -33,6 +34,8 @@
 #define _DEBUG
 #define _ENABLE_SLEEP
 
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 #define OW_WRITE_SCRATCHPAD 0x4E
 #define OW_READ_SCRATCHPAD 0xBE
@@ -75,13 +78,42 @@ extern void ir_sendNEC (unsigned long data, int nbits);
 #define OWT_PRESENCE 20
 #define OWT_RESET_PRESENCE 4
 
+<<<<<<< HEAD
 #define MAX_DATA 8
+=======
+#define MAX_DATA 10
+>>>>>>> Version Update with more decent commands and ATMEGA support
 #ifndef OW_SERIAL
 #define OW_SERIAL 1
 #endif	
 
+<<<<<<< HEAD
 volatile uint8_t rdata[MAX_DATA+1];
 volatile uint8_t wdata[MAX_DATA+1];
+=======
+#define MAX_BTN 2
+
+#define	BTN_LOW  0
+#define	BTN_HIGH  1
+#define	BTN_TIMER_LOW  2
+#define	BTN_TIMER_HIGH 3
+#define	BTN_UNSTABLE 4
+#define BTN_PRESSING 5
+#define BTN_PRESS_LOW 6
+#define BTN_PRESSED_LONG 7
+#define BTN_PRESSED 8
+#define BTN_UNKNOWN 9
+#define BTN_INVALID 10
+
+struct button {
+	unsigned long time;
+	unsigned long press;
+	int state /*: 4*/;
+	int last /*: 4*/;
+}btn[MAX_BTN];
+
+volatile uint8_t data[MAX_DATA+1];
+>>>>>>> Version Update with more decent commands and ATMEGA support
 
 uint8_t owCommand(uint8_t cmd);
 void prepareScratch();
@@ -92,6 +124,7 @@ volatile uint8_t scrc;		//CRC calculation
 volatile uint8_t cbuf;
 /* Store interrupt source for read out via scratchpad */
 volatile uint8_t IntSrc;
+<<<<<<< HEAD
 
 /* defaults:
  * - 2 input and output
@@ -100,6 +133,24 @@ volatile uint8_t IntSrc;
 uint8_t owid[8] ={ OW_FAMILY, FD_SERIAL, FD_VERSION, 0x22,
 	FD_PIN_LAMP | (FD_PIN_LEDST << 2), 0x00, 0x01, 0 };
 
+=======
+
+uint8_t owid[8] =
+#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
+//{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x04, 0xFA };
+#if (OW_FAMILY == 0xA3)
+{ 0xA3, 0x01, 0x3, 0x0, 0x00, 0x00, 0x01, 0xCA };
+#else
+{ 0xA2, 0x01, 0x1, 0x0, 0x00, 0x00, 0x01, 0xC5 };
+#endif
+#else
+{ 0xA8, 0x01, 0x5, 0x0, 0x00, 0x00, 0x01, 0xC5 };
+#endif
+//{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x01, 0xC5 };
+//{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x02, 0x27 };
+//{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x03, 0x79 };
+
+>>>>>>> Version Update with more decent commands and ATMEGA support
 uint8_t func;		// function currently selected
 volatile uint8_t bitp;		//pointer to current bit
 volatile uint8_t bytep;		//pointer to current byte
@@ -110,8 +161,12 @@ volatile uint8_t actbit;	//current
 volatile uint8_t srcount;	//counter for search rom
 uint8_t pinMsk;
 
+<<<<<<< HEAD
 ISR(INT0_vect) {
 	uint8_t p;
+=======
+PIN_INT {
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	sleep_disable();
 	if (wmode == OWW_WRITE_0) {
 		SET_LOW;
@@ -167,7 +222,10 @@ ISR(TIMER0_OVF_vect)
 
 	//Ask input line sate 
 	uint8_t p = ((OW_PIN & OW_PINN) == OW_PINN);
+<<<<<<< HEAD
 	digitalWrite(LED, p);
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	//Interrupt still active ?
 	if (CHK_INT_EN) {
 		// reset pulse
@@ -227,11 +285,36 @@ ISR(TIMER0_OVF_vect)
 					lmode = OWM_READ_SCRATCHPAD;
 					lbytep = 0;
 					scrc = 0;	//from first position
+<<<<<<< HEAD
 					rdata[0] = IntSrc;
 					rdata[7] = func;
 					/* in case of ADC reset activity bit */
 					func &= ~4;
 					lactbit = (lbitp & rdata[0]) == lbitp;
+=======
+					/*
+					 * setup data to be read
+					 */
+					data[0] = IntSrc;
+					/* clear interrupt status */
+					IntSrc = 0;
+#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
+					data[1] = 0;
+					if ((PININ & LED) == 0)
+						data[1] |= 2;
+					if ((PININ & LAMP) == 0)
+						data[1] |= 1;
+#else
+					data[1] = (PINOUT & 0x1F);
+//					data[7] = DDRC;
+#endif	
+					data[2] = (PININ & 0x1F);
+					data[5] = func;
+					data[6] = btn[0].state;
+					/* in case of ADC reset activity bit */
+					func &= ~4;
+					lactbit = (lbitp & data[0]) == lbitp;
+>>>>>>> Version Update with more decent commands and ATMEGA support
 					/* prepare for sending first bit */
 					lwmode = lactbit;
 					break;
@@ -376,6 +459,7 @@ ISR(TIMER0_OVF_vect)
 uint8_t owCommand(uint8_t cmd)
 {
 	uint8_t lmode = OWM_SLEEP;
+#if (OW_FAMILY == 0xA3)
 	int i;
 #if (OW_FAMILY == 0xA3)
 	union {
@@ -384,7 +468,21 @@ uint8_t owCommand(uint8_t cmd)
 	} d;
 #endif
 
+	/* 4xh : switch output of pin 1-4 to high
+	 * 5xh : switch output of pin 1-4 to low
+	 */
+	if ((cmd & 0x30) == 0x30) {
+		/* on */
+		pinMode(cmd & 0x7, OUTPUT);
+		digitalWrite (cmd & 0x7, LOW);
+	}
+	if ((cmd & 0x30) == 0x20) {
+		/* off */
+		/* switch to input */
+		pinMode(cmd & 0x7, INPUT);
+	}
 	switch (cmd) {
+<<<<<<< HEAD
 	case 0x20:
 	case 0x30:
 	case 0x21:
@@ -429,6 +527,23 @@ uint8_t owCommand(uint8_t cmd)
 		break;
 	case 0x51:
 		func |= 0x10;
+=======
+	case 0x48:
+		func &= ~2;
+		break;
+	case 0x44:	//Start Convert
+		func |= 0x4;
+		break;
+	case 0x64:	//check button state
+		//pinMode(1, INPUT);
+		func |= 0x8;
+		break;
+	case 0x65:	//disable check button
+		func &= ~0x8;
+		break;
+	case 0x68:
+		func |= 2;
+>>>>>>> Version Update with more decent commands and ATMEGA support
 		break;
 #endif	
 	case 0x42:
@@ -455,6 +570,7 @@ uint8_t owCommand(uint8_t cmd)
 		break;
 #if (OW_FAMILY == 0xA3)
 	case 0x70:
+#if (OW_FAMILY == 0xA3)
 		// send IR
 		for (i = 0; i < 4; ++i)
 			d.b[i] = wdata[i];
@@ -466,7 +582,9 @@ uint8_t owCommand(uint8_t cmd)
 		 * Vol down 5EA1D827 = 1587664935
 		 */
 		ir_sendNEC (d.l, 32);
+#endif
 		break;
+<<<<<<< HEAD
 #endif
 	case 0x80:
 		for (i = 0; i < 7; ++i) {
@@ -475,6 +593,8 @@ uint8_t owCommand(uint8_t cmd)
 		owid[7] = crc();
 		eeprom_write_block ((const void*)&owid, (void*)0, 8);
 		break;
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	default:
 		//all other commands do nothing
 		break;
@@ -503,6 +623,7 @@ static uint8_t crc() {
 }
 
 #if defined(PCINT0_vect)
+<<<<<<< HEAD
 /*
  * PIN B interrupts
  */
@@ -527,12 +648,40 @@ ISR(PCINT0_vect)
 #endif
 		IntSrc |= 0x20;
 	}
+=======
+ISR(PCINT0_vect)
+{
+#if defined(PCMSK0)
+	cbi (PCMSK0, PCINT0);
+#endif
+#if defined(PCMSK)
+	cbi (PCMSK, PCINT0);
+#endif
+	/* check button till released */
+	func |= 8;
+	digitalWrite(3, LOW);
+}
+#endif
+
+/* PB1 */
+#if defined(PCINT1_vect)
+ISR(PCINT1_vect)
+{
+#if defined(PCMSK0)
+	cbi (PCMSK0, PCINT1);
+#endif
+#if defined(PCMSK)
+	cbi (PCMSK, PCINT1);
+#endif
+	IntSrc |= 4;
+>>>>>>> Version Update with more decent commands and ATMEGA support
 }
 #endif
 
 /* static setup at compile time */
 void owidSetup()
 {
+<<<<<<< HEAD
 	uint8_t i, id[8];
 	/*
 	uint8_t osc;
@@ -552,10 +701,33 @@ void owidSetup()
 #endif	
 #if (OW_FAMILY == 0xA3)
 	owid[4] |= (FD_PIN_IRTX << 4);
+=======
+	eeprom_read_block((void*)&owid, (const void*)0, 7);
+	if (owid[0] != 0xFF) {
+		owid[1] = FD_SERIAL + 1;
+		return;
+	}
+	owid[0] = OW_FAMILY;
+	owid[1] = FD_SERIAL;
+	owid[2] = FD_VERSION;
+	/* 4th: max output/input pins | [7..4] output| [3..0] input | */
+#if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
+	owid[3] = 0x55;
+#else
+	owid[3] = 0x32;
+#endif	
+#if (OW_FAMILY == 0xA2)
+	owid[4] = FD_PIN_LAMP;
+	owid[5] = 0;
+#endif
+#if (OW_FAMILY == 0xA3)
+	owid[4] = FD_PIN_LAMP | (FD_PIN_LEDST << 2) | (FD_PIN_IRTX << 4);
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	owid[5] = (FD_PIN_BTN << 4);
 #endif
 #if (OW_FAMILY == 0xA8)
 	/*
+<<<<<<< HEAD
 	 * Pin 0-3 setup
 	 * #4 PD3 input with external interrupt
 	 */
@@ -568,10 +740,31 @@ void owidSetup()
 	/* group id */
 	owid[7] = crc();
 	eeprom_write_block ((const void*)&owid, (void*)0, 8);
+=======
+	 * Pin 1-4 setup
+	 * #4 PD3 input with external interrupt
+	 */
+	owid[4] = (FD_PIN_LAMP) | (FD_PIN_LEDST << 2) | (FD_PIN_OUT << 6);
+	/*
+	 * Pin 5-8 setup
+	 */
+	owid[5] = (FD_PIN_INT << 2) | (FD_PIN_BTN << 4);
+#endif
+	/* group id */
+	owid[6] = 1;
+	owid[7] = crc();
+	eeprom_write_block ((const void*)&owid, (void*)0, 7);
+>>>>>>> Version Update with more decent commands and ATMEGA support
 }
 
 void pinSetup()
 {
+<<<<<<< HEAD
+=======
+	//pinMode (5, OUTPUT);
+	//pinMode (4, OUTPUT);
+	//pinMode (3, OUTPUT);
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	// setup PIN #0, Lamp
 	switch (owid[4] & 0x3) {
 		case FD_PIN_LAMP:
@@ -589,6 +782,7 @@ void pinSetup()
 			break;
 	}
 	// setup PIN #2
+<<<<<<< HEAD
 	switch ((owid[4] & 0x30) >> 4) {
 		case FD_PIN_IRTX:
 		case FD_PIN_OUT:
@@ -596,12 +790,15 @@ void pinSetup()
 			break;
 	}
 #if (OW_FAMILY == 0xA8)
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	// setup PIN #3, LED
 	switch ((owid[4] & 0xc0) >> 6) {
 		case FD_PIN_OUT:
 			pinMode(3, OUTPUT);
 			break;
 	}
+<<<<<<< HEAD
 #endif
 	pinMsk = 0; 
 #if (OW_FAMILY == 0xA8)
@@ -672,27 +869,64 @@ static inline void enablePinInts()
 	sbi(GIFR, PCIF);
 #endif
 	SREG = oldSREG;
+=======
+	pinMsk = 0; 
+	// setup PIN #5
+	if (((owid[5] & 0x0c) >> 2) == FD_PIN_INT) {
+		pinMode (5, INPUT);
+		pinMsk |= PCINT1; 
+	}
+	// setup PIN #6
+	if (((owid[5] & 0x30) >> 4) == FD_PIN_BTN) {
+		pinMode (6, INPUT);
+		pinMsk |= PCINT0; 
+	}
+#if defined PCIFR
+	// atmega 88/168/...
+	sbi (PCICR, PCIE0);
+	PCIFR=0xff;
+	PCMSK0 = pinMsk;
+#elif defined(GIFR) 
+	// attiny85....
+	sbi (GIMSK, PCIE);
+	GIFR = 0xff;
+	// attiny85....
+	PCMSK = pinMsk;
+#else
+	#error missing PC interrupt mask
+#endif
+>>>>>>> Version Update with more decent commands and ATMEGA support
 }
 
 void setup() {
 	int i;
+<<<<<<< HEAD
 #ifdef DEBUG
 #endif
+=======
+>>>>>>> Version Update with more decent commands and ATMEGA support
 #if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
 #ifdef HAVE_UART
 	serial_init();
 #else
 	DDRD |= _BV (PD0) | _BV (PD1);
+<<<<<<< HEAD
 #endif /* HAVE_UART */
 #else
 	DDRB |= _BV(PB3) | _BV(PB4);
 #endif /* __AVR_ATmegax8__ */
+=======
+#endif
+#endif
+	IntSrc = 0;
+>>>>>>> Version Update with more decent commands and ATMEGA support
 	wmode = OWW_NO_WRITE;
 	mode = OWM_SLEEP;
 	RESET_LOW;
 	SET_FALLING;
 	INIT_AVR();
 	DIS_TIMER;
+<<<<<<< HEAD
 	init();
 	cli();
 	owidSetup();
@@ -739,6 +973,181 @@ static inline void owResetSignal()
 	SREG = oldSREG;
 	printf ("signal!\r\n");
 #endif
+=======
+	mode = OWM_SLEEP;
+	data[0] = 0;
+	data[1] = 0;
+	data[2] = 0xbe;
+	data[3] = 0xef;
+	data[4] = 0xca;
+	data[5] = 0xfe;
+	owidSetup();
+	pinSetup();
+	sei();
+	for (i = 5; i > 1; i--) {
+		LED_OFF();
+		delay(25 * i);
+		LED_ON();
+		delay(50);
+	}
+	LED_OFF();
+}
+
+int checkBtn (uint8_t pin, struct button *p)
+{
+	uint8_t in;
+	
+	in = digitalRead(pin);
+	if (p->last != in) {
+		p->last = in;
+		p->state = BTN_UNSTABLE;
+		p->time = 0;
+		return BTN_UNSTABLE;
+	}
+	/* from here we are stable */
+	switch (p->state) {
+	case BTN_TIMER_HIGH:
+		if (millis() - p->time < 100)
+			return BTN_UNSTABLE;
+		if (in != HIGH)
+			return BTN_INVALID;
+		p->state = BTN_HIGH;
+		/* button released or was high, check press time */
+		if (p->press == 0)
+			return BTN_INVALID;
+		return BTN_PRESSED;
+	case BTN_TIMER_LOW:
+		if (millis() - p->time < 100)
+			return BTN_UNSTABLE;
+		if (in != LOW)
+			return BTN_INVALID;
+		/* stable state */
+		/* 0 or 1 = LOW or HIGH */
+		p->state = BTN_LOW;
+		p->time = millis();
+		p->press = millis();
+		return BTN_PRESS_LOW;
+		break;
+	case BTN_LOW:
+		if (p->press == 0)
+			return BTN_INVALID;
+		if (millis() - p->press > 1000) {
+			p->press = 0;
+			return BTN_PRESSED_LONG;
+		}
+		return BTN_PRESSING;
+	case BTN_HIGH:
+		p->press = 0;
+		return BTN_HIGH;
+	case BTN_UNSTABLE:
+		if (in == LOW)
+			p->state = BTN_TIMER_LOW;
+		else
+			p->state = BTN_TIMER_HIGH;
+		p->time = millis();
+		return BTN_UNSTABLE;
+	}
+	return BTN_UNKNOWN;
+}
+
+static inline void enablePinInts()
+{
+#if defined(PCMSK0)
+	PCMSK0 = pinMsk;
+	PCIFR = pinMsk;
+#elif defined(PCMSK) 
+	// attiny85....
+	PCMSK = pinMsk;
+	sbi(GIFR, PCIF);
+#endif
+}
+
+void loop() {
+	int i;
+	static long ledTime;
+	static char led;
+	int t;
+
+	if (func & 8) {
+		t = checkBtn(6, &btn[0]);
+		data[7] = t;
+		switch (t) {
+		case BTN_PRESS_LOW:
+			func |= 1;
+			digitalWrite(3, HIGH);
+			break;
+		case BTN_PRESSED_LONG:
+			func &= ~(1 | 2 | 8);
+			LED_OFF();
+			IntSrc |= 1;
+			enablePinInts();
+			break;
+		case BTN_PRESSED:
+			func &= ~(1 | 8);
+			if (func & 2)
+				func &= ~2;
+			else
+				func |= 2;
+			IntSrc |= 2;
+			enablePinInts();
+			break;
+		case BTN_UNSTABLE:
+			/* wait */
+			break;
+		case BTN_HIGH:
+		case BTN_INVALID:
+			func &= ~(1 | 8);
+			enablePinInts();
+			digitalWrite(3, HIGH);
+			break;
+		}
+	}
+	if (IntSrc & 4) {
+	}
+	t = 900;
+	if (func & 2)
+		t = 400;
+	if (func & 1)
+		t = 50;
+	if (func & ( 2 | 1 | 8)) {
+		if (led == 1 && millis() - ledTime > 100) {
+			LED_OFF();
+			ledTime = millis();
+			led = 0;
+		}
+		if (led == 0 && millis() - ledTime > t) {
+			LED_ON();
+			ledTime = millis();
+			led = 1;
+		}
+	}
+#define SLEEP_ENABLE
+	if (mode == OWM_SLEEP && func == 0) {
+#ifdef SLEEP_ENABLE
+		uint8_t oldSREG;
+		for (i = 5; i > 1; i--) {
+			LED_OFF();
+			delay(200);
+			LED_ON();
+			delay(100 * i);
+			if (func != 0)
+				return;
+		}
+		LED_OFF();
+		digitalWrite(3, LOW);
+		oldSREG = SREG;
+		cli();
+		/* for wake-up */
+		//if ((owid[5] & 0x03) == FD_PIN_BTN)
+		enablePinInts();
+		SET_LEVEL;
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+		SREG = oldSREG;
+		sleep_mode();
+		digitalWrite(3, HIGH);
+#endif			
+	}
+>>>>>>> Version Update with more decent commands and ATMEGA support
 }
 
 void prepareScratch()
@@ -903,6 +1312,7 @@ void loop() {
 
 int main(void)
 {
+	init();
 	setup();
 
 	while (1) {
