@@ -6,6 +6,8 @@
 *.ko
 *.obj
 *.elf
+*.bin
+*.hex
 
 # Linker output
 *.ilk
@@ -27,6 +29,7 @@
 *.so
 *.so.*
 *.dylib
+*.s#?
 
 # Executables
 *.exe
@@ -50,3 +53,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+*.zip
+.DS_Store
+*.esproj
+/html
+config.h

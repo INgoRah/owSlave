@@ -1,6 +1,7 @@
 //owdevice - A small 1-Wire emulator for AVR Microcontroller
 //
 //Copyright (C) 2012  Tobias Mueller mail (at) tobynet.de
+//Copyright (C) 2018  INgo.Rah@gmx.net
 //
 //This program is free software: you can redistribute it and/or modify
 //it under the terms of the GNU General Public License as published by
@@ -15,18 +16,18 @@
 //You should have received a copy of the GNU General Public License
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //
-//
-//VERSION 1.1 1Wire Barometric Pressure Sensor ATMEGA48 
-//VERSION 1.2 DS18B20  ATTINY13 (AD input) and ATTINY25 (internal sensor)
 //http://www.tm3d.de/index.php/1-wire-device-mit-avr
 // http://www.mikrocontroller.net/topic/44100#new
 // http://www.tm3d.de/index.php/
 #include "Arduino.h"
+#include "owflexdev.h"
 
 #define OW_WRITE_SCRATCHPAD 0x4E
 #define OW_READ_SCRATCHPAD 0xBE
 
+#if (OW_FAMILY == 0xA3)
 extern void ir_sendNEC (unsigned long data, int nbits);
+#endif
 	
 /* set 1-Wire line to low */
 #define SET_LOW OW_DDR |= OW_PINN; OW_PORT &= ~OW_PORTN
@@ -62,40 +63,57 @@ extern void ir_sendNEC (unsigned long data, int nbits);
 #define OWT_RESET_PRESENCE 4
 
 #define MAX_DATA 10
+#ifndef OW_SERIAL
+#define OW_SERIAL 1
+#endif	
+
+#define MAX_BTN 2
+
+#define	BTN_LOW  0
+#define	BTN_HIGH  1
+#define	BTN_TIMER_LOW  2
+#define	BTN_TIMER_HIGH 3
+#define	BTN_UNSTABLE 4
+#define BTN_PRESSING 5
+#define BTN_PRESS_LOW 6
+#define BTN_PRESSED_LONG 7
+#define BTN_PRESSED 8
+#define BTN_UNKNOWN 9
+#define BTN_INVALID 10
+
+struct button {
+	unsigned long time;
+	unsigned long press;
+	int state /*: 4*/;
+	int last /*: 4*/;
+}btn[MAX_BTN];
+
 volatile uint8_t data[MAX_DATA+1];
 
 uint8_t owCommand(uint8_t cmd);
 
 volatile uint8_t scrc;		//CRC calculation
+/* Input buffer for a command */
+volatile uint8_t cbuf;
+/* Store interrupt source for read out via scratchpad */
+volatile uint8_t IntSrc;
 
-volatile uint8_t cbuf;		//Input buffer for a command
 uint8_t owid[8] =
-{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x04, 0xFA };
-//{ 0xA3, 0x0, 0x10, 0x84, 0x00, 0x00, 0x01, 0xCA };
-//{0x28, 0xA2, 0xD9, 0x84, 0x00, 0x00, 0x02, 0xEA};  
-//{0x28, 0xA2, 0xD9, 0x84, 0x00, 0x00, 0x03, 0xB4};
+#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
+//{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x04, 0xFA };
+#if (OW_FAMILY == 0xA3)
+{ 0xA3, 0x01, 0x3, 0x0, 0x00, 0x00, 0x01, 0xCA };
+#else
+{ 0xA2, 0x01, 0x1, 0x0, 0x00, 0x00, 0x01, 0xC5 };
+#endif
+#else
+{ 0xA8, 0x01, 0x5, 0x0, 0x00, 0x00, 0x01, 0xC5 };
+#endif
 //{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x01, 0xC5 };
 //{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x02, 0x27 };
 //{ 0xA2, 0xA2, 0x10, 0x84, 0x00, 0x00, 0x03, 0x79 };
-//set your own ID http://www.tm3d.de/index.php/tools/14-crc8-berechnung
 
-/*
-commands supported:
-LED On: 0x67 / 103
-LED Off: 0x47 / 71
-cmd 1 197 103
-cmd 1 197 71
-cmd 2 39 ...
-
-Read 0xBE / 190
-read 1 197 190
-read 1 197 71
-read 2 39 ...
-returns DE AD <lamp status> <state>
-*/
-
-volatile uint8_t func;		// function currently selected
-
+uint8_t func;		// function currently selected
 volatile uint8_t bitp;		//pointer to current bit
 volatile uint8_t bytep;		//pointer to current byte
 
@@ -103,54 +121,10 @@ volatile uint8_t mode;		//state
 volatile uint8_t wmode;		//if 0 next bit that send the device is  0
 volatile uint8_t actbit;	//current
 volatile uint8_t srcount;	//counter for search rom
-
-void pinMode(uint8_t pin, uint8_t mode)
-{
-	uint8_t bit = pin;
-
-	if (mode == INPUT) { 
-		uint8_t oldSREG = SREG;
-                cli();
-		DDRB &= ~bit;
-		PORTB &= ~bit;
-		SREG = oldSREG;
-	} else if (mode == INPUT_PULLUP) {
-		uint8_t oldSREG = SREG;
-                cli();
-		PORTB &= ~bit;
-		PORTB |= bit;
-		SREG = oldSREG;
-	} else {
-		uint8_t oldSREG = SREG;
-                cli();
-		DDRB |= bit;
-		SREG = oldSREG;
-	}
-}
-
-void digitalWrite(uint8_t bit, uint8_t val)
-{
-	uint8_t oldSREG = SREG;
-	cli();
-
-	if (val == LOW)
-		PORTB &= ~bit;
-	else
-		PORTB |= bit;
-
-	SREG = oldSREG;
-}
-
-void delayMicroseconds(unsigned int us)
-{
-	int i;
-	
-	for (i=0; i < us; i++)
-		_delay_us (1);
-}
+uint8_t pinMsk;
 
 PIN_INT {
-
+	sleep_disable();
 	if (wmode == OWW_WRITE_0) {
 		SET_LOW;
 		wmode = OWW_NO_WRITE;
@@ -161,6 +135,8 @@ PIN_INT {
 	switch (mode) {
 	case OWM_SLEEP:
 		TCNT_REG = ~(OWT_MIN_RESET);
+		/* todo: introduce a new state with interrupts disabled? */
+		SET_FALLING;
 		EN_OWINT;	//other edges ?
 		break;
 		//start of reading with falling edge from master, reading closed in timer isr
@@ -200,16 +176,9 @@ TIMER_INT {
 
 	//Ask input line sate 
 	uint8_t p = ((OW_PIN & OW_PINN) == OW_PINN);
-	DBG_2OFF();
-#ifdef TEST_CODE
-	if (mode == OWM_TEST) {
-		LED_ON();
-		DIS_TIMER;
-	}
-#endif	
 	//Interrupt still active ?
 	if (CHK_INT_EN) {
-		//maybe reset pulse
+		// reset pulse
 		if (p == 0) {
 			lmode = OWM_CHK_RESET;	//wait for rising edge
 			SET_RISING;
@@ -217,12 +186,14 @@ TIMER_INT {
 		DIS_TIMER;
 	} else
 		switch (lmode) {
-		case OWM_RESET:	//Reset pulse and time after is finished, now go in presence state
+		case OWM_RESET:	
+			/* Minimum reset pulse time elapsed 
+			 * now go in presence state, signal it
+			 */
 			lmode = OWM_PRESENCE;
 			SET_LOW;
 			TCNT_REG = (uint8_t)~(OWT_PRESENCE);
 			DIS_OWINT;	//No Pin interrupt necessary only wait for presence is done
-			LED_OFF();
 			break;
 		case OWM_PRESENCE:
 			RESET_LOW;	//Presence is done now wait for a command
@@ -264,6 +235,27 @@ TIMER_INT {
 					lmode = OWM_READ_SCRATCHPAD;
 					lbytep = 0;
 					scrc = 0;	//from first position
+					/*
+					 * setup data to be read
+					 */
+					data[0] = IntSrc;
+					/* clear interrupt status */
+					IntSrc = 0;
+#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
+					data[1] = 0;
+					if ((PININ & LED) == 0)
+						data[1] |= 2;
+					if ((PININ & LAMP) == 0)
+						data[1] |= 1;
+#else
+					data[1] = (PINOUT & 0x1F);
+//					data[7] = DDRC;
+#endif	
+					data[2] = (PININ & 0x1F);
+					data[5] = func;
+					data[6] = btn[0].state;
+					/* in case of ADC reset activity bit */
+					func &= ~4;
 					lactbit = (lbitp & data[0]) == lbitp;
 					/* prepare for sending first bit */
 					lwmode = lactbit;
@@ -274,16 +266,23 @@ TIMER_INT {
 			}
 			break;
 		case OWM_SEARCH_ROM:
-			RESET_LOW;	//Set low also if nothing send (branch takes time and memory)
-			lsrcount++;	//next search rom mode
+			/*
+			 * Set low also if nothing send 
+			 * (branch takes time and memory)
+			 */
+			RESET_LOW;
+			//next search rom mode
+			lsrcount++;
 			switch (lsrcount) {
 			case 1:
-				lwmode = !lactbit;	//preparation sending complement
+				//preparation sending complement
+				lwmode = !lactbit;
 				break;
 			case 3:
+				/* check master bit */
 				if (p != (lactbit == 1)) {
-					//check master bit
-					lmode = OWM_SLEEP;	//not the same go sleep
+					// not the same go sleep
+					lmode = OWM_SLEEP;
 				} else {
 					lbitp = (lbitp << 1);
 					if (lbitp == 0) {
@@ -291,7 +290,8 @@ TIMER_INT {
 						lbitp = 1;
 						lbytep++;
 						if (lbytep >= 8) {
-							lmode = OWM_SLEEP;	//all bits processed 
+							lmode = OWM_SLEEP;	
+							//all bits processed 
 							break;
 						}
 					}
@@ -311,7 +311,8 @@ TIMER_INT {
 					lbytep++;
 					lbitp = 1;
 					if (lbytep >= 8) {
-						lmode = OWM_READ_COMMAND;	//same? get next command
+						lmode = OWM_READ_COMMAND;
+						//same? get next command
 						cbuf = 0;
 						break;
 					}
@@ -371,7 +372,6 @@ TIMER_INT {
 	bitp = lbitp;
 	srcount = lsrcount;
 	actbit = lactbit;
-	DBG_2ON();
 }
 
 /* finished receiving a command. This function is called from timer context.
@@ -380,27 +380,47 @@ returns new one wire mode */
 uint8_t owCommand(uint8_t cmd)
 {
 	uint8_t lmode = OWM_SLEEP;
+#if (OW_FAMILY == 0xA3)
 	int i;
 	union {
 		unsigned long l;
 		unsigned char b[4];
 	} d;
+#endif
 
+	/* 4xh : switch output of pin 1-4 to high
+	 * 5xh : switch output of pin 1-4 to low
+	 */
+	if ((cmd & 0x30) == 0x30) {
+		/* on */
+		pinMode(cmd & 0x7, OUTPUT);
+		digitalWrite (cmd & 0x7, LOW);
+	}
+	if ((cmd & 0x30) == 0x20) {
+		/* off */
+		/* switch to input */
+		pinMode(cmd & 0x7, INPUT);
+	}
 	switch (cmd) {
-	case 0x67:
-		//LED_ON();
-		func = 1;
-		DIS_TIMER;
+	case 0x48:
+		func &= ~2;
+		break;
+	case 0x44:	//Start Convert
+		func |= 0x4;
+		break;
+	case 0x64:	//check button state
+		//pinMode(1, INPUT);
+		func |= 0x8;
+		break;
+	case 0x65:	//disable check button
+		func &= ~0x8;
 		break;
 	case 0x68:
-		LAMP_ON();
-		DIS_TIMER;
-		break;
-	case 0x69:
+		func |= 2;
 		break;
 	case 0x70:
+#if (OW_FAMILY == 0xA3)
 		// send IR
-		DIS_TIMER;
 		for (i = 0; i < 4; ++i)
 			d.b[i] = data[i];
 		/*
@@ -411,16 +431,8 @@ uint8_t owCommand(uint8_t cmd)
 		 * Vol down 5EA1D827 = 1587664935
 		 */
 		ir_sendNEC (d.l, 32);
+#endif
 		break;
-	case 0x47:
-		LED_OFF();
-		func = 0;
-		break;
-	case 0x48:
-		LAMP_OFF();
-		func = 0;
-		break;
-	case 0x44:	//Start Convert
 	default:
 		//all other commands do nothing
 		break;
@@ -429,34 +441,9 @@ uint8_t owCommand(uint8_t cmd)
 	return lmode;
 }
 
-static int lamp = 0;
-void check_btn ()
-{
-	static int t_sample = 0;
-
-	if (T_IN() == 0 && t_sample != 0xff) {
-		if (t_sample++ > 150) {
-			t_sample = 0xff;
-			if (lamp == 0) {
-				lamp = 1;
-				LED_ON();
-				LAMP_ON();
-			} else {
-				lamp = 0;
-				LAMP_OFF();
-				LED_OFF();
-			}
-			//data[2] = lamp;
-		}
-		_delay_ms(1);
-	}
-	if (T_IN() && t_sample == 0xff)
-		t_sample = 0;
-}
-
 static uint8_t crc() {
 	unsigned char inbyte, crc = 0, len = 7;
-	unsigned char i, max;
+	unsigned char i, mix;
 	unsigned char* addr = owid;
 
 	while (len--) {
@@ -473,7 +460,134 @@ static uint8_t crc() {
 	return crc;
 }
 
+#if defined(PCINT0_vect)
+ISR(PCINT0_vect)
+{
+#if defined(PCMSK0)
+	cbi (PCMSK0, PCINT0);
+#endif
+#if defined(PCMSK)
+	cbi (PCMSK, PCINT0);
+#endif
+	/* check button till released */
+	func |= 8;
+	digitalWrite(3, LOW);
+}
+#endif
+
+/* PB1 */
+#if defined(PCINT1_vect)
+ISR(PCINT1_vect)
+{
+#if defined(PCMSK0)
+	cbi (PCMSK0, PCINT1);
+#endif
+#if defined(PCMSK)
+	cbi (PCMSK, PCINT1);
+#endif
+	IntSrc |= 4;
+}
+#endif
+
+/* static setup at compile time */
+void owidSetup()
+{
+	eeprom_read_block((void*)&owid, (const void*)0, 7);
+	if (owid[0] != 0xFF) {
+		owid[1] = FD_SERIAL + 1;
+		return;
+	}
+	owid[0] = OW_FAMILY;
+	owid[1] = FD_SERIAL;
+	owid[2] = FD_VERSION;
+	/* 4th: max output/input pins | [7..4] output| [3..0] input | */
+#if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
+	owid[3] = 0x55;
+#else
+	owid[3] = 0x32;
+#endif	
+#if (OW_FAMILY == 0xA2)
+	owid[4] = FD_PIN_LAMP;
+	owid[5] = 0;
+#endif
+#if (OW_FAMILY == 0xA3)
+	owid[4] = FD_PIN_LAMP | (FD_PIN_LEDST << 2) | (FD_PIN_IRTX << 4);
+	owid[5] = (FD_PIN_BTN << 4);
+#endif
+#if (OW_FAMILY == 0xA8)
+	/*
+	 * Pin 1-4 setup
+	 * #4 PD3 input with external interrupt
+	 */
+	owid[4] = (FD_PIN_LAMP) | (FD_PIN_LEDST << 2) | (FD_PIN_OUT << 6);
+	/*
+	 * Pin 5-8 setup
+	 */
+	owid[5] = (FD_PIN_INT << 2) | (FD_PIN_BTN << 4);
+#endif
+	/* group id */
+	owid[6] = 1;
+	owid[7] = crc();
+	eeprom_write_block ((const void*)&owid, (void*)0, 7);
+}
+
+void pinSetup()
+{
+	//pinMode (5, OUTPUT);
+	//pinMode (4, OUTPUT);
+	//pinMode (3, OUTPUT);
+	// setup PIN #0, Lamp
+	switch (owid[4] & 0x3) {
+		case FD_PIN_LAMP:
+		case FD_PIN_OUT:
+			pinMode(0, OUTPUT);
+			break;
+	}
+	// setup PIN #1, LED
+	switch ((owid[4] & 0xc) >> 2) {
+		case FD_PIN_LEDST:
+		case FD_PIN_OUT:
+			pinMode(1, OUTPUT);
+			break;
+		case FD_PIN_ADC:
+			break;
+	}
+	// setup PIN #2
+	// setup PIN #3, LED
+	switch ((owid[4] & 0xc0) >> 6) {
+		case FD_PIN_OUT:
+			pinMode(3, OUTPUT);
+			break;
+	}
+	pinMsk = 0; 
+	// setup PIN #5
+	if (((owid[5] & 0x0c) >> 2) == FD_PIN_INT) {
+		pinMode (5, INPUT);
+		pinMsk |= PCINT1; 
+	}
+	// setup PIN #6
+	if (((owid[5] & 0x30) >> 4) == FD_PIN_BTN) {
+		pinMode (6, INPUT);
+		pinMsk |= PCINT0; 
+	}
+#if defined PCIFR
+	// atmega 88/168/...
+	sbi (PCICR, PCIE0);
+	PCIFR=0xff;
+	PCMSK0 = pinMsk;
+#elif defined(GIFR) 
+	// attiny85....
+	sbi (GIMSK, PCIE);
+	GIFR = 0xff;
+	// attiny85....
+	PCMSK = pinMsk;
+#else
+	#error missing PC interrupt mask
+#endif
+}
+
 void setup() {
+	int i;
 #if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
 #ifdef HAVE_UART
 	uart_init((UART_BAUD_SELECT_DOUBLE_SPEED((BAUD), F_CPU)));
@@ -481,44 +595,193 @@ void setup() {
 	DDRD |= _BV (PD0) | _BV (PD1);
 #endif
 #endif
+	IntSrc = 0;
 	wmode = OWW_NO_WRITE;
 	func = 0;
 	RESET_LOW;
 	SET_FALLING;
 	INIT_AVR();
 	DIS_TIMER;
-	sei();
-	_delay_ms(50);
-	LED_ON();
-	_delay_ms(200);
-	LED_OFF();
 	mode = OWM_SLEEP;
-	data[0] = 0xde;
-	data[1] = 0xad;
+	data[0] = 0;
+	data[1] = 0;
 	data[2] = 0xbe;
 	data[3] = 0xef;
 	data[4] = 0xca;
 	data[5] = 0xfe;
-	owid[7] = crc();
-}
-	
-void loop() {
-	//check_btn();
-#if 1
-	if (func == 1 && mode == OWM_SLEEP) {
-		LED_ON();
-		_delay_ms(200);
+	owidSetup();
+	pinSetup();
+	sei();
+	for (i = 5; i > 1; i--) {
 		LED_OFF();
-		_delay_ms(1000);
+		delay(25 * i);
+		LED_ON();
+		delay(50);
 	}
+	LED_OFF();
+}
+
+int checkBtn (uint8_t pin, struct button *p)
+{
+	uint8_t in;
+	
+	in = digitalRead(pin);
+	if (p->last != in) {
+		p->last = in;
+		p->state = BTN_UNSTABLE;
+		p->time = 0;
+		return BTN_UNSTABLE;
+	}
+	/* from here we are stable */
+	switch (p->state) {
+	case BTN_TIMER_HIGH:
+		if (millis() - p->time < 100)
+			return BTN_UNSTABLE;
+		if (in != HIGH)
+			return BTN_INVALID;
+		p->state = BTN_HIGH;
+		/* button released or was high, check press time */
+		if (p->press == 0)
+			return BTN_INVALID;
+		return BTN_PRESSED;
+	case BTN_TIMER_LOW:
+		if (millis() - p->time < 100)
+			return BTN_UNSTABLE;
+		if (in != LOW)
+			return BTN_INVALID;
+		/* stable state */
+		/* 0 or 1 = LOW or HIGH */
+		p->state = BTN_LOW;
+		p->time = millis();
+		p->press = millis();
+		return BTN_PRESS_LOW;
+		break;
+	case BTN_LOW:
+		if (p->press == 0)
+			return BTN_INVALID;
+		if (millis() - p->press > 1000) {
+			p->press = 0;
+			return BTN_PRESSED_LONG;
+		}
+		return BTN_PRESSING;
+	case BTN_HIGH:
+		p->press = 0;
+		return BTN_HIGH;
+	case BTN_UNSTABLE:
+		if (in == LOW)
+			p->state = BTN_TIMER_LOW;
+		else
+			p->state = BTN_TIMER_HIGH;
+		p->time = millis();
+		return BTN_UNSTABLE;
+	}
+	return BTN_UNKNOWN;
+}
+
+static inline void enablePinInts()
+{
+#if defined(PCMSK0)
+	PCMSK0 = pinMsk;
+	PCIFR = pinMsk;
+#elif defined(PCMSK) 
+	// attiny85....
+	PCMSK = pinMsk;
+	sbi(GIFR, PCIF);
 #endif
+}
+
+void loop() {
+	int i;
+	static long ledTime;
+	static char led;
+	int t;
+
+	if (func & 8) {
+		t = checkBtn(6, &btn[0]);
+		data[7] = t;
+		switch (t) {
+		case BTN_PRESS_LOW:
+			func |= 1;
+			digitalWrite(3, HIGH);
+			break;
+		case BTN_PRESSED_LONG:
+			func &= ~(1 | 2 | 8);
+			LED_OFF();
+			IntSrc |= 1;
+			enablePinInts();
+			break;
+		case BTN_PRESSED:
+			func &= ~(1 | 8);
+			if (func & 2)
+				func &= ~2;
+			else
+				func |= 2;
+			IntSrc |= 2;
+			enablePinInts();
+			break;
+		case BTN_UNSTABLE:
+			/* wait */
+			break;
+		case BTN_HIGH:
+		case BTN_INVALID:
+			func &= ~(1 | 8);
+			enablePinInts();
+			digitalWrite(3, HIGH);
+			break;
+		}
+	}
+	if (IntSrc & 4) {
+	}
+	t = 900;
+	if (func & 2)
+		t = 400;
+	if (func & 1)
+		t = 50;
+	if (func & ( 2 | 1 | 8)) {
+		if (led == 1 && millis() - ledTime > 100) {
+			LED_OFF();
+			ledTime = millis();
+			led = 0;
+		}
+		if (led == 0 && millis() - ledTime > t) {
+			LED_ON();
+			ledTime = millis();
+			led = 1;
+		}
+	}
+#define SLEEP_ENABLE
+	if (mode == OWM_SLEEP && func == 0) {
+#ifdef SLEEP_ENABLE
+		uint8_t oldSREG;
+		for (i = 5; i > 1; i--) {
+			LED_OFF();
+			delay(200);
+			LED_ON();
+			delay(100 * i);
+			if (func != 0)
+				return;
+		}
+		LED_OFF();
+		digitalWrite(3, LOW);
+		oldSREG = SREG;
+		cli();
+		/* for wake-up */
+		//if ((owid[5] & 0x03) == FD_PIN_BTN)
+		enablePinInts();
+		SET_LEVEL;
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+		SREG = oldSREG;
+		sleep_mode();
+		digitalWrite(3, HIGH);
+#endif			
+	}
 }
 
 int main(void)
 {
+	init();
 	setup();
 
-	/*DBG_P("Init Slave\n\r");*/
 	while (1) {
 		loop();
 	}
