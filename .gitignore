@@ -5,6 +5,7 @@
 *.o
 *.ko
 *.obj
+*.bin
 *.elf
 
 # Linker output
@@ -50,3 +51,16 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+*.asm
+*.exe
+*.pdf
+*.map
+*.bat
+*.o
+*.s#?
+*.zip
+.DS_Store
+*.esproj
+/html
+config.h
