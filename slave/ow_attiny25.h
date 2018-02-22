@@ -13,13 +13,11 @@
 #define SET_FALLING MCUCR=(1<<ISC01); //set interrupt at falling edge
 #define SET_LEVEL MCUCR=0; //set interrupt at low level
 #define CHK_INT_EN (GIMSK&(1<<INT0))==(1<<INT0) //test if interrupt enabled
-#define PIN_INT ISR(INT0_vect)  // the interrupt service routine
 
 //Timer Interrupt
 #define EN_TIMER {TIMSK |= (1<<TOIE0); TIFR|=(1<<TOV0);} //enable timer interrupt
 #define DIS_TIMER TIMSK  &= ~(1<<TOIE0); // disable timer interrupt
 #define TCNT_REG TCNT0  //register of timer-counter
-#define TIMER_INT ISR(TIM0_OVF_vect) //the timer interrupt service routine
 
 /* 
  * Initializations of AVR
@@ -38,15 +36,9 @@
 	CLKPR=0; \
 	TIMSK=0; \
 	GIMSK=(1<<INT0); \
-	TCCR0B=(1<<CS00)|(1<<CS01); \
-	DDRB = _BV(PB3) | _BV(PB4) | _BV(PB1); \
-	PORTB = _BV(PB3) | _BV(PB4) | _BV (PB0)
+	TCCR0B=(1<<CS00)|(1<<CS01);
 
 #define PINOUT PINB
 #define PININ PINB
-#define LED _BV (PB3)
-#define LAMP _BV (PB4)
-#define LED_OFF()	PORTB |= _BV (PB3)
-#define LED_ON()	PORTB &= ~(_BV (PB3))
-#define LAMP_OFF()	PORTB |= _BV (PB4)
-#define LAMP_ON()	PORTB &= ~(_BV (PB4))
+
+#define LED 0 /* PB4 */

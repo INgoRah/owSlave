@@ -13,7 +13,7 @@
 #	define SYSCLOCK  8000000  // main internal
 #endif
 
-#ifdef IR_SENDER
+#if (OW_FAMILY == 0xA3)
 // PWM, Phase Correct, TOP OCRA, 
 // no prescaler (CS20=1)
 #define TIMER_ENABLE_PWM     (TCCR0A |= _BV(COM0B1))
@@ -26,7 +26,7 @@
   OCR0B = pwmval / 3; \
 })
 
-#define TIMER_PWM_PIN        PB1  /* ATtiny85 */
+#define TIMER_PWM_PIN        2  /* ATtiny85 */
 
 #define NEC_BITS          32
 #define NEC_HDR_MARK    9000

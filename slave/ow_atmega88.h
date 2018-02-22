@@ -12,13 +12,11 @@
 #define SET_FALLING EICRA=(1<<ISC01);	//set interrupt at falling edge
 #define SET_LEVEL EICRA=0; //set interrupt at low level
 #define CHK_INT_EN (EIMSK&(1<<INT0))==(1<<INT0)	//test if interrupt enabled
-#define PIN_INT ISR(INT0_vect)	// the interrupt service routine
 
 //Timer Interrupt
 #define EN_TIMER {TIMSK0 |= (1<<TOIE0); TIFR0|=(1<<TOV0);}	//enable timer interrupt
 #define DIS_TIMER TIMSK0 &=~(1<<TOIE0);	// disable timer interrupt
 #define TCNT_REG TCNT0		//register of timer-counter
-#define TIMER_INT ISR(TIMER0_OVF_vect)	//the timer interrupt service routine
 
 /* 
  * Initializations of AVR
@@ -42,15 +40,10 @@
 	TCCR0B=(1<<CS00)|(1<<CS01);
 
 #define PINOUT PINC
-#define LED _BV (PC1)
-#define LAMP _BV (PC2)
 
-#define LED_OFF()	PORTC |= LED
-#define LED_ON()	PORTC &= ~(LED)
-#define LAMP_OFF()	PORTC |= LAMP
-#define LAMP_ON()	PORTC &= ~(LAMP)
-
-#define PININ PINB
+#define LED 3 /* PC3 */
+#define DOOR 1 /* PC1 */
+#define RING 0 /* PC2 */
 
 #ifdef HAVE_UART
 #include "uart.h"
