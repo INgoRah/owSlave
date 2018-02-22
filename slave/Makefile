@@ -1,9 +1,10 @@
 OW_FAMILY?=A8
 
-FD_DEFS=-DOW_FAMILY=0x$(OW_FAMILY) -DFD_VERSION=1 -DFD_SERIAL=3
+FD_DEFS=-DOW_FAMILY=0x$(OW_FAMILY) -DFD_VERSION=1 -DFD_SERIAL=6
 
 ifeq ($(OW_FAMILY), A8)
 TARGET=atmega88
+UART=1
 endif
 ifeq ($(OW_FAMILY), A3)
 TARGET=attiny85
@@ -17,7 +18,7 @@ endif
 #AVR_PATH="C:\Program Files (x86)\Arduino\hardware\tools\avr\bin"
 # ISP=usbasp -P usb -B 2000 -i200
 # ISP=stk500v2 PORT=/dev/ttyUSB0
-ISP=stk500v2 -P COM9 -B 20 -i10
+ISP=stk500v2 -P COM4 -B 20 -i10 # 9
 #ISP=stk500v1 -P COM6 -b 57600 -B 5000 -i1000
 #ISP=arduino  -P COM3 -b 19200 -B 5000 -i1000
 CLOCK=8000000UL
@@ -28,11 +29,10 @@ OBJDUMP        = $(AVR_PATH)avr-objdump
 OBJSIZE        = $(AVR_PATH)avr-size
 
 PRG         = owfam_$(OW_FAMILY)
-OBJ         = main.o irsend.o wiring.o
+OBJ         = main.o irsend.o wiring.o pins.o
 OPTIMIZE    = -Os
 DEFS        = -I. -DF_CPU=$(CLOCK) -DTARGET=$(TARGET) $(FD_DEFS)
 LIBS        =
-UART = 0
 
 ifeq ($(TARGET), atmega8)
 HFUSE=0xd9
@@ -56,13 +56,11 @@ ifeq ($(TARGET), attiny85)
 # HFUSE=0xdf LFUSE=0xb2 ???
 LFUSE=0xd2
 HFUSE=0xdf
-DEFS+=-DIR_SENDER
 endif
 
 ifeq ($(UART), 1)
 DEFS += -DBAUD=9600 -DHAVE_UART -DUART_RX_BUFFER_SIZE=16 -DUART_TX_BUFFER_SIZE=16
-OBJ += uart.o uart_addon.o
-#OBJ += printf.o cli.o
+OBJ += uart.o printf.o
 endif
 
 all: clean_main $(PRG).elf $(PRG).bin $(PRG).hex text disasm
@@ -87,7 +85,6 @@ help:
 	@echo "       ISP=${ISP}"
 	@echo "       PORT=${PORT}"
 	@echo "       gcc -g -Wall $(OPTIMIZE) -mmcu=$(TARGET) $(DEFS) $(LIBS) $(LDFLAGS)"
-	
 
 # Override is only needed by avr-lib build system.
 override CFLAGS        = -g -Wall $(OPTIMIZE) -mmcu=$(TARGET) $(DEFS)
@@ -119,6 +116,10 @@ text: hex bin # srec
 hex:  $(PRG).hex
 bin:  $(PRG).bin
 srec: $(PRG).srec
+
+tune:
+	$(CC) $(CFLAGS) $(LDFLAGS) -o tune.o tune.c $(LIBS)
+	$(OBJSIZE) --mcu=$(TARGET) tune.o
 
 $(PRG).hex:	$(PRG).elf
 	$(AVR_PATH)avr-objcopy -j .text -j .data -O ihex $(PRG).elf $(PRG).hex

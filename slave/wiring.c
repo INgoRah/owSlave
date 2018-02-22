@@ -89,6 +89,7 @@ const uint8_t PROGMEM digital_pin_to_bit_mask_PGM[] = {
 	NOT_A_PIN	, //			#4
 	NOT_A_PIN	, //			#5
 	_BV( PB0 )	, // BTN		#6
+	_BV( PB5 )	, // BTN		#7
 #else
 	_BV( 2 )	, // PC 2 ** LAMP	#0
 	_BV( 1 )	, // PC 1 ** LED	#1
@@ -134,13 +135,11 @@ const uint8_t PROGMEM digital_pin_to_bit_mask_PGM[] = {
 
 volatile unsigned long timer1_overflow_count = 0;
 volatile unsigned long timer1_millis = 0;
-static unsigned char timer1_fract = 0;
+/*static*/ unsigned char timer1_fract = 0;
 
-#if defined(__AVR_ATtiny25__) || defined(__AVR_ATtiny85__)
-ISR(TIM1_OVF_vect)
-#else
-ISR(TIMER1_OVF_vect)
+#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
 #endif
+ISR(TIMER1_OVF_vect)
 {
 	// copy these to local variables so they can be stored in registers
 	// (volatile variables must be read from memory on every access)
@@ -179,13 +178,7 @@ unsigned long micros() {
 	
 	cli();
 	m = timer1_overflow_count;
-#if defined(TCNT1L)
 	t = TCNT1;
-#elif defined(TCNT1)
-	t = TCNT1;
-#else
-	#error timer 1 not defined
-#endif
 
 #ifdef TIFR1
 	if ((TIFR1 & _BV(TOV1)) && (t < 255))
@@ -330,7 +323,6 @@ void pinMode(uint8_t pin, uint8_t mode)
 
 void digitalWrite(uint8_t pin, uint8_t val)
 {
-	//uint8_t oldSREG = SREG;
 	uint8_t bit;
 	volatile uint8_t *out;
 	
@@ -342,12 +334,12 @@ void digitalWrite(uint8_t pin, uint8_t val)
 	if (port == NOT_A_PIN) return;
 	out = portOutputRegister(port);
 #endif
-	//cli();
 	if (val == LOW)
 		*out &= ~bit;
 	else
 		*out |= bit;
-	//SREG = oldSREG;
+	printf("#%d=%d PORTC=%X\n\r", pin, val, PORTC);
+	
 }
 
 static const uint8_t analog_reference = 0;
@@ -403,17 +395,17 @@ void init()
 	// work there
 	sei();
 	
+	// set TOV on TOP=0xFF, 8 bit fast PWM mode, clear on match
+	// (WGM12 or CTC)
 #if defined(TCCR1A) && defined(WGM11)
 	// this combination is for the standard 88/168/328/1280/2560
-	// set TOV on TOP=0xFF, 8 bit fast PWM mode
 	sbi(TCCR1B, WGM12); // for timer 0 force 8 bit
 	sbi(TCCR1A, WGM10);
 #endif
 	// set timer 1 prescale factor to 64
 #if defined(TCCR1) && defined(CS11) && defined(CS10)
 	// this combination is for the standard atmega8 / attiny85
-	sbi(TCCR1, CS11);
-	sbi(TCCR1, CS10);
+	TCCR1 = _BV(PWM1A) | _BV(CS12) | _BV(CS11) | _BV(CS10);
 #elif defined(TCCR1B) && defined(CS11) && defined(CS10)
 	// this combination is for the standard 88/168/328/1280/2560
 	sbi(TCCR1B, CS11);
@@ -423,7 +415,10 @@ void init()
 #endif
 	// enable timer 1 overflow interrupt
 #if defined(TIMSK) && defined(TOIE1)
+	OCR1C = 0xff;
+	sbi(TIFR, TOV1);
 	sbi(TIMSK, TOIE1);
+
 #elif defined(TIMSK1) && defined(TOIE1)
 	sbi(TIMSK1, TOIE1);
 #else
