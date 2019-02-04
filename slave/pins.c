@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "pins.h"
 
+#ifdef BTN_SUPPORT
 int checkBtn (uint8_t pin, struct pinState *p)
 {
 	uint8_t in;
@@ -56,8 +57,9 @@ int checkBtn (uint8_t pin, struct pinState *p)
 	}
 	return in;
 }
+#endif
 
-#if (OW_FAMILY == 0xA8)
+#if 0 //(OW_FAMILY == 0xA8)
 int checkPulse(uint8_t pin, struct pinState *p)
 {
 	uint8_t in;

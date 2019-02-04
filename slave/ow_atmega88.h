@@ -44,6 +44,8 @@
 #define LED 3 /* PC3 */
 #define DOOR 1 /* PC1 */
 #define RING 0 /* PC2 */
+#define RINGIN 7 /* PB1 */
+#define BTNIN 6 /* PB0 */
 
 #ifdef HAVE_UART
 #include "uart.h"

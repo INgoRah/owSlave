@@ -5,6 +5,7 @@
 // http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1210243556
 // Also influenced by http://zovirl.com/2008/11/12/building-a-universal-remote-with-an-arduino/
 //
+#if (OW_FAMILY == 0xA3)
 #include "Arduino.h"
 
 #ifdef F_CPU
@@ -13,7 +14,6 @@
 #	define SYSCLOCK  8000000  // main internal
 #endif
 
-#if (OW_FAMILY == 0xA3)
 // PWM, Phase Correct, TOP OCRA, 
 // no prescaler (CS20=1)
 #define TIMER_ENABLE_PWM     (TCCR0A |= _BV(COM0B1))

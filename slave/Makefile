@@ -3,11 +3,12 @@ OW_FAMILY?=A8
 FD_DEFS=-DOW_FAMILY=0x$(OW_FAMILY) -DFD_VERSION=1 -DFD_SERIAL=6
 
 ifeq ($(OW_FAMILY), A8)
-TARGET=atmega88
-UART=1
+TARGET=atmega48
+FD_DEFS+=-DBTN_SUPPORT
 endif
 ifeq ($(OW_FAMILY), A3)
 TARGET=attiny85
+#FD_DEFS+=-DBTN_SUPPORT
 endif
 ifeq ($(OW_FAMILY), A2)
 TARGET=attiny85
@@ -18,7 +19,7 @@ endif
 #AVR_PATH="C:\Program Files (x86)\Arduino\hardware\tools\avr\bin"
 # ISP=usbasp -P usb -B 2000 -i200
 # ISP=stk500v2 PORT=/dev/ttyUSB0
-ISP=stk500v2 -P COM4 -B 20 -i10 # 9
+ISP=stk500v2 -P COM8 -B 20 -i10 # 9
 #ISP=stk500v1 -P COM6 -b 57600 -B 5000 -i1000
 #ISP=arduino  -P COM3 -b 19200 -B 5000 -i1000
 CLOCK=8000000UL
@@ -42,9 +43,15 @@ endif
 ifeq ($(TARGET), atmega88)
 HFUSE=0xdf
 LFUSE=0xf2
+UART=1
 PROG_TARGET=atmega88p
 else
 PROG_TARGET=$(TARGET)
+endif
+
+ifeq ($(TARGET), atmega48)
+HFUSE=0xdf
+LFUSE=0xf2
 endif
 
 ifeq ($(TARGET), attiny25)
