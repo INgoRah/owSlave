@@ -30,7 +30,7 @@
 #include "pins.h"
 #include <util/delay.h>
 
-#define NODEBUG
+#define DEBUG
 #define ENABLE_SLEEP
 
 #define OW_WRITE_SCRATCHPAD 0x4E
@@ -73,7 +73,7 @@ extern void ir_sendNEC (unsigned long data, int nbits);
 #define OWT_PRESENCE 20
 #define OWT_RESET_PRESENCE 4
 
-#define MAX_DATA 10
+#define MAX_DATA 8
 #ifndef OW_SERIAL
 #define OW_SERIAL 1
 #endif	
@@ -91,16 +91,12 @@ volatile uint8_t cbuf;
 /* Store interrupt source for read out via scratchpad */
 volatile uint8_t IntSrc;
 
-uint8_t owid[8] =
-#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
-#if (OW_FAMILY == 0xA3)
-{ 0xA3, 0x01, 0x3, 0x0, 0x00, 0x00, 0x01, 0xCA };
-#else
-{ 0xA2, 0x01, 0x1, 0x0, 0x00, 0x00, 0x01, 0xC5 };
-#endif
-#else
-{ 0xA8, 0x01, 0x5, 0x0, 0x00, 0x00, 0x01, 0xC5 };
-#endif
+/* defaults:
+ * - 2 input and output
+ * - default pin #0: lamp, #1 LED
+ */
+uint8_t owid[8] ={ OW_FAMILY, FD_SERIAL, FD_VERSION, 0x22,
+	FD_PIN_LAMP | (FD_PIN_LEDST << 2), 0x00, 0x01, 0 };
 
 uint8_t func;		// function currently selected
 volatile uint8_t bitp;		//pointer to current bit
@@ -155,11 +151,7 @@ ISR(INT0_vect) {
 	EN_TIMER;
 }
 
-#if defined(TIM0_OVF_vect)
-ISR(TIM0_OVF_vect)
-#elif defined(TIMER0_OVF_vect)
 ISR(TIMER0_OVF_vect)
-#endif
 {
 	uint8_t lwmode = wmode;	//let this variables in registers
 	uint8_t lmode = mode;
@@ -230,8 +222,7 @@ ISR(TIMER0_OVF_vect)
 					lbytep = 0;
 					scrc = 0;	//from first position
 					rdata[0] = IntSrc;
-					/* clear interrupt status */
-					IntSrc = 0;
+					rdata[7] = func;
 					/* in case of ADC reset activity bit */
 					func &= ~4;
 					lactbit = (lbitp & rdata[0]) == lbitp;
@@ -323,12 +314,16 @@ ISR(TIMER0_OVF_vect)
 					lscrc >>= 1;
 				lbitp = (lbitp << 1);
 				if (!lbitp) {
+					/* clear interrupt status */
+					IntSrc = 0;
 					lbitp = 1;
 					if (lbytep++ >= MAX_DATA) {
 						lmode = OWM_SLEEP;
+						rdata[3] = 0;
+						rdata[4] = 0;
 						break;
-					} else if (lbytep == 9)
-						rdata[9] = lscrc;
+					} else if (lbytep == MAX_DATA - 1)
+						rdata[MAX_DATA] = lscrc;
 				}
 				lactbit = (lbitp & rdata[lbytep]) == lbitp;
 				lwmode = lactbit;
@@ -353,8 +348,9 @@ ISR(TIMER0_OVF_vect)
 }
 
 /* finished receiving a command. This function is called from timer context.
- Depending on the return value to upper state machine handles further data
-returns new one wire mode */
+ * Depending on the return value to upper state machine handles further data
+ * returns new one wire mode
+ */
 uint8_t owCommand(uint8_t cmd)
 {
 	uint8_t lmode = OWM_SLEEP;
@@ -367,6 +363,21 @@ uint8_t owCommand(uint8_t cmd)
 #endif
 
 	switch (cmd) {
+	case 0x20:
+	case 0x30:
+	case 0x21:
+	case 0x31:
+#if (OW_FAMILY == 0xA8)
+		if ((cmd & 0x30) == 0x30) {
+			/* on */
+			digitalWrite (cmd & 0xf, HIGH);
+		}
+		if ((cmd & 0x30) == 0x20) {
+			/* off */
+			digitalWrite (cmd & 0xf, LOW);
+		}
+		break;
+#endif	
 	case 0x22:
 	case 0x32:
 	case 0x23:
@@ -377,55 +388,47 @@ uint8_t owCommand(uint8_t cmd)
 		 */
 		if ((cmd & 0x30) == 0x30) {
 			/* on */
-			pinMode(cmd & 0xf, OUTPUT);
+			//pinMode(cmd & 0xf, OUTPUT);
 			digitalWrite (cmd & 0xf, LOW);
 		}
 		if ((cmd & 0x30) == 0x20) {
 			/* off */
-			pinMode(cmd & 0xf, INPUT);
+			//pinMode(cmd & 0xf, INPUT);
 			digitalWrite (cmd & 0xf, HIGH);
-		}
-		break;
-	case 0x20:
-	case 0x30:
-	case 0x21:
-	case 0x31:
-		if ((cmd & 0x30) == 0x30) {
-			/* on */
-			digitalWrite (cmd & 0xf, HIGH);
-		}
-		if ((cmd & 0x30) == 0x20) {
-			/* off */
-			digitalWrite (cmd & 0xf, LOW);
 		}
 		break;
 	case 0x40:
 		func = 0;
+		printf("test\n\t");
 		break;
+#if (OW_FAMILY == 0xA8)
 	case 0x41:
 		func &= ~0x10;
 		break;
 	case 0x51:
 		func |= 0x10;
 		break;
+#endif	
 	case 0x42:
 		func &= ~2;
 		break;
 	case 0x52:
 		func |= 2;
 		break;
+#ifdef BTN_SUPPORT
 	case 0x48:
 		func &= ~0x20;
 		break;
 	case 0x58:
 		func |= 0x20;
 		break;
+#endif
 	case 0x44:	//Start Convert
 		//func |= 0x4;
 		prepareScratch();
 		break;
-	case 0x70:
 #if (OW_FAMILY == 0xA3)
+	case 0x70:
 		// send IR
 		for (i = 0; i < 4; ++i)
 			d.b[i] = wdata[i];
@@ -437,13 +440,14 @@ uint8_t owCommand(uint8_t cmd)
 		 * Vol down 5EA1D827 = 1587664935
 		 */
 		ir_sendNEC (d.l, 32);
-#endif
 		break;
+#endif
 	case 0x80:
 		for (i = 0; i < 7; ++i) {
 			owid[i] = wdata[i];
 		}
 		owid[7] = crc();
+		eeprom_write_block ((const void*)&owid, (void*)0, 8);
 		break;
 	default:
 		//all other commands do nothing
@@ -503,32 +507,25 @@ ISR(PCINT0_vect)
 /* static setup at compile time */
 void owidSetup()
 {
+	uint8_t i, id[8];
 	/*
 	uint8_t osc;
 	osc = eeprom_read_byte((const void*)8);
 	if (osc == 0xFF)
 		eeprom_write_byte((uint8_t *)8, OSCCAL);
 	*/
-	eeprom_read_block((void*)&owid, (const void*)0, 8);
-	if (owid[0] != 0xFF) {
-		owid[1] = FD_SERIAL + 1;
+	eeprom_read_block((void*)&id, (const void*)0, 8);
+	if (id[0] != 0xFF && id[1] != 0xFF) {
+		for (i = 0; i < 8; i++)
+			owid[i] = id[i];
 		return;
 	}
-	owid[0] = OW_FAMILY;
-	owid[1] = FD_SERIAL;
-	owid[2] = FD_VERSION;
 	/* 4th: max output/input pins | [7..4] output| [3..0] input | */
-#if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
+#if (OW_FAMILY == 0xA8)
 	owid[3] = 0x44;
-#else
-	owid[3] = 0x22;
 #endif	
-#if (OW_FAMILY == 0xA2)
-	owid[4] = FD_PIN_LAMP | (FD_PIN_LEDST << 2);
-	owid[5] = 0;
-#endif
 #if (OW_FAMILY == 0xA3)
-	owid[4] = FD_PIN_LAMP | (FD_PIN_LEDST << 2) | (FD_PIN_IRTX << 4);
+	owid[4] |= (FD_PIN_IRTX << 4);
 	owid[5] = (FD_PIN_BTN << 4);
 #endif
 #if (OW_FAMILY == 0xA8)
@@ -543,7 +540,6 @@ void owidSetup()
 	owid[5] = FD_PIN_UNUSED | (FD_PIN_UNUSED << 2) | (FD_PIN_BTN << 4) | (FD_PIN_INT << 6);
 #endif
 	/* group id */
-	owid[6] = 1;
 	owid[7] = crc();
 	eeprom_write_block ((const void*)&owid, (void*)0, 8);
 }
@@ -676,11 +672,13 @@ void setup() {
 	owidSetup();
 	pinSetup();
 	IntSrc = 0;
-	func = 0;
+	func = 2;
 	enablePinInts();
 	sei();
+
 #ifdef DEBUG
-	for (i = 10; i > 1; i--) {
+	printf("\n\rSetup..DDRC=%X PORTC=%X PINC=%X\n\r", DDRC & 0xf, PORTC & 0xf, PINC & 0xf);
+	for (i = 5; i > 1; i--) {
 		digitalWrite(LED, HIGH);
 		delay(25 * i);
 		digitalWrite(LED, LOW);
@@ -691,6 +689,7 @@ void setup() {
 
 static inline void owResetSignal()
 {
+#if 0
 	int to = 20;
 	uint8_t oldSREG;
 	
@@ -707,8 +706,13 @@ static inline void owResetSignal()
 	_delay_us (60);
 	//delayMicroseconds(30);
 	RESET_LOW;
+	while ((OW_PIN & OW_PINN) == 0 && to > 0) {
+		delay(1);
+		to--;
+	}
 	SREG = oldSREG;
 	printf ("signal!\r\n");
+#endif
 }
 
 void prepareScratch()
@@ -724,19 +728,16 @@ void prepareScratch()
 	for (i = 0; i < ((owid[3] & 0xF0) >> 4); i++)
 		rdata[2] |= digitalRead(i + 6) << i;
 #if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
-	rdata[3] = DDRC;
-	rdata[4] = PORTC;
 #else	
 	rdata[3] = 0;
-	rdata[4] = 0;
+	rdata[4] = DDRB;
 #endif	
-	rdata[5] = DDRB;
-	rdata[6] = PORTB;
-	rdata[7] = func;
+	rdata[5] = PORTB;
+	rdata[6] = PINB;
 }		
 
 void loop() {
-	int t = 0;
+	uint8_t oldSREG;
 #ifdef HAVE_UART
 	static long stTime;
 #endif	
@@ -746,8 +747,9 @@ void loop() {
 	static char led;
 #endif	
 #if (OW_FAMILY == 0xA8)
-	int ring = 0;
-	static int bell = 0;
+	static char ring = 0;
+	static char bell = 0;
+	static unsigned long ringTime;
 #endif
 
 #if (OW_FAMILY == 0xA8)
@@ -761,53 +763,48 @@ void loop() {
 		func |= 0x10;
 	}
 	if (func & 0x10) {
-		digitalWrite(LED, digitalRead(7));
-		t = checkPulse(7, &btn[1]);
-		if (digitalRead(7) == LOW) {
+		digitalWrite(LED, digitalRead(RINGIN));
+		switch (checkBtn(RINGIN, &btn[1])) {
+		case BTN_LOW:
 			if (ring == 0) {
-				printf ("ring\n\r");
-				IntSrc |= 4;
+				ringTime = millis();
 				ring = 1;
-				owResetSignal();
-				func &= ~(0x10);
 			}
-		} else {
-			ring = 0;
-		}
-		printf ("checkPulse %d %d\n\r", t, btn[1].state);
-		switch (t) {
-		case PIN_LOW:
-			ring = 1;
-			IntSrc |= 4;
-			printf ("ring\n\r");
 			break;
-		case PIN_FLOAT:
-			ring = 1;
-			IntSrc |= 8;
-			printf ("float\n\r");
-			break;
-		case PIN_HIGH:
-			/* spike */
-			if (ring) {
+		case BTN_PRESSED:
+		case BTN_RELEASED:
+		case BTN_HIGH:
+			/* filter out spike */
+			if (ring == 1) {
+				printf("Ring! func=%X\t INT=%X Time=%d\n\r", func, IntSrc, ringTime);
+				ringTime = millis() - ringTime;
+				printf("Ring End! func=%X\t INT=%X dTime=%d\n\r", func, IntSrc, ringTime);
 				ring = 0;
-				printf ("ring\n\r");
+				rdata[3] = (ringTime & 0xff00) >> 8;
+				rdata[4] = ringTime & 0xff;
+				IntSrc |= 4;
 				owResetSignal();
-				enablePinInts();
 			}
+			/* fall-through */
+		case BTN_INVALID:
+			enablePinInts();
 			func &= ~(0x10);
 			break;
 		}
 	}
+#endif	
+#ifdef BTN_SUPPORT
 	if (func & 0x20 || func & 0x8) {
-		t = checkBtn(6, &btn[0]);
-		switch (t) {
+		switch (checkBtn(BTNIN, &btn[0])) {
 		case BTN_PRESSED_LONG:
-			IntSrc |= 1;
+#if (OW_FAMILY == 0xA8)
 			digitalWrite(DOOR, HIGH);
+#endif		
 			enablePinInts();
 			break;
 		case BTN_PRESSED:
 			func &= ~(8);
+#if (OW_FAMILY == 0xA8)
 			if (bell == 1) {
 				bell = 0;
 				digitalWrite(RING, LOW);
@@ -816,6 +813,7 @@ void loop() {
 				bell = 1;
 				digitalWrite(RING, HIGH);
 			}
+#endif			
 			IntSrc |= 2;
 			owResetSignal();
 			enablePinInts();
@@ -824,7 +822,9 @@ void loop() {
 			/* fall-through */
 		case BTN_INVALID:
 		case BTN_HIGH:
+#if (OW_FAMILY == 0xA8)
 			digitalWrite(DOOR, LOW);
+#endif	
 			func &= ~(8);
 			enablePinInts();
 			break;
@@ -832,19 +832,14 @@ void loop() {
 	}
 #endif	
 #ifdef DEBUG
-	t = 1200;
-	if (func & 2)
-		t = 800;
-	if (func & 1)
-		t = 50;
 	if (func & (2)) {
-		if (led == 1 && millis() - ledTime > 100) {
+		if (led == 1 && millis() - ledTime > 200) {
 			digitalWrite(LED, HIGH);
 			prepareScratch();
 			ledTime = millis();
 			led = 0;
 		}
-		if (led == 0 && millis() - ledTime > t) {
+		if (led == 0 && millis() - ledTime > 800) {
 			digitalWrite(LED, LOW);
 			prepareScratch();
 			ledTime = millis();
@@ -853,24 +848,10 @@ void loop() {
 	}
 #endif	
 #ifdef ENABLE_SLEEP
+	oldSREG = SREG;
+	cli();
 	if ((mode == OWM_SLEEP || mode == OWM_READ_SCRATCHPAD) &&
 		func == 0) {
-		uint8_t oldSREG;
-#ifdef DEBUG	
-		for (i = 5; i > 1; i--) {
-			digitalWrite(LED, LOW);
-			delay(100*i);
-			digitalWrite(LED, HIGH);
-			delay(100 * i);
-			if (func != 0)
-				return;
-		}
-#endif
-		printf("sleep\n\r");
-		if (func != 0)
-			return;
-		oldSREG = SREG;
-		cli();
 		/* for wake-up */
 		enablePinInts();
 		SET_LEVEL;
@@ -879,18 +860,18 @@ void loop() {
 		sleep_mode();
 		delay(1);
 		prepareScratch();
-		printf ("...\r\n");
-		delay(1);
-#ifdef HAVE_UART
+#if defined(HAVE_UART) && defined(DEBUG)
 	} else {
-		if (millis() - stTime > 4000) {
+		SREG = oldSREG;
+		if (millis() - stTime > 5000) {
 			stTime = millis();
-			printf("func=%X\tow=%X INT=%X PCMSK=%X t=%X\n\r", func, mode, IntSrc, PCMSK0, t);
+			printf("func=%X\tow=%X INT=%X PCMSK=%X\n\r", func, mode, IntSrc, PCMSK0);
 			printf("DDRC=%X PORTC=%X PINC=%X\n\r", DDRC & 0xf, PORTC & 0xf, PINC & 0xf);
-			printf("DDRB=%X PORTB=%X PINB=%X\n\r", DDRB & 0xf, PORTB & 0xf, PINB & 0xf);
+			printf("DDRD=%X PORTD=%X PIND=%X\n\r", DDRD & OW_PINN, PORTD & OW_PINN, PIND & OW_PINN);
 		}
 #endif		
-	}		
+	}
+	
 #endif /* ENABLE_SLEEP */
 }
 
