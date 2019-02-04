@@ -137,8 +137,6 @@ volatile unsigned long timer1_overflow_count = 0;
 volatile unsigned long timer1_millis = 0;
 /*static*/ unsigned char timer1_fract = 0;
 
-#if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
-#endif
 ISR(TIMER1_OVF_vect)
 {
 	// copy these to local variables so they can be stored in registers
@@ -205,6 +203,7 @@ void delay(unsigned long ms)
 	}
 }
 
+#if 0 // seems not yet be working, endless loop?
 /* Delay for the given number of microseconds.  Assumes a 1, 8, 12, 16, 20 or 24 MHz clock. */
 void delayMicroseconds(unsigned int us)
 {
@@ -272,12 +271,13 @@ void delayMicroseconds(unsigned int us)
 	);
 	// return = 4 cycles
 }
+#endif
 
 int digitalRead(uint8_t pin)
 {
 	uint8_t bit = digitalPinToBitMask(pin);
 #if defined(__AVR_ATtiny25__) || defined (__AVR_ATtiny85__)
-	if (PINB & _BV(bit))
+	if (PINB & bit)
 #else
 	uint8_t port = digitalPinToPort(pin);
 
@@ -338,10 +338,9 @@ void digitalWrite(uint8_t pin, uint8_t val)
 		*out &= ~bit;
 	else
 		*out |= bit;
-	printf("#%d=%d PORTC=%X\n\r", pin, val, PORTC);
-	
 }
 
+#if 0
 static const uint8_t analog_reference = 0;
 #define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
 
@@ -388,6 +387,7 @@ int analogRead(uint8_t pin)
 	// combine the two bytes
 	return (high << 8) | low;
 }
+#endif
 
 void init()
 {

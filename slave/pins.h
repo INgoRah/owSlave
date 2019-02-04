@@ -5,7 +5,7 @@
  *  Pin/Button configuration
  */
 #define MAX_BTN 2
-#define BTN_MIN_TIME 60
+#define BTN_MIN_TIME 50
 #define BTN_LONG_PRESS_TIME 250
 
 /*
