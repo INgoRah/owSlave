@@ -1,4 +1,4 @@
-OW_FAMILY?=A8
+OW_FAMILY?=A2
 
 FD_DEFS=-DOW_FAMILY=0x$(OW_FAMILY) -DFD_VERSION=1 -DFD_SERIAL=6
 
@@ -133,6 +133,7 @@ $(PRG).hex:	$(PRG).elf
 
 %.hex: %.elf
 	$(OBJCOPY) -j .text -j .data -O ihex $< $@
+	$(OBJSIZE) --mcu=$(TARGET) $<
 
 %.srec: %.elf
 	$(OBJCOPY) -j .text -j .data -O srec $< $@

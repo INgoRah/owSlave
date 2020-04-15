@@ -30,8 +30,9 @@
 #include "pins.h"
 #include <util/delay.h>
 
-#define DEBUG
-#define ENABLE_SLEEP
+#define _DEBUG
+#define _ENABLE_SLEEP
+
 
 #define OW_WRITE_SCRATCHPAD 0x4E
 #define OW_READ_SCRATCHPAD 0xBE
@@ -55,7 +56,8 @@ extern void ir_sendNEC (unsigned long data, int nbits);
 #define OWM_MATCH_ROM 5		//test number
 #define OWM_READ_SCRATCHPAD 6
 #define OWM_WRITE_SCRATCHPAD 7
-#define OWM_TEST 8
+#define OWM_WRITE_PIO 9
+#define OWM_TEST 10
 
 //Write a bit after next falling edge from master
 //its for sending a zero as soon as possible 
@@ -109,6 +111,7 @@ volatile uint8_t srcount;	//counter for search rom
 uint8_t pinMsk;
 
 ISR(INT0_vect) {
+	uint8_t p;
 	sleep_disable();
 	if (wmode == OWW_WRITE_0) {
 		SET_LOW;
@@ -116,6 +119,8 @@ ISR(INT0_vect) {
 	}		//if necessary set 0-Bit 
 	/* disable interrupt, only in OWM_SLEEP mode it is active */
 	DIS_OWINT;
+	p = ((OW_PIN & OW_PINN) == OW_PINN);
+	digitalWrite(LED, p);
 
 	switch (mode) {
 	case OWM_SLEEP:
@@ -162,6 +167,7 @@ ISR(TIMER0_OVF_vect)
 
 	//Ask input line sate 
 	uint8_t p = ((OW_PIN & OW_PINN) == OW_PINN);
+	digitalWrite(LED, p);
 	//Interrupt still active ?
 	if (CHK_INT_EN) {
 		// reset pulse
@@ -228,6 +234,12 @@ ISR(TIMER0_OVF_vect)
 					lactbit = (lbitp & rdata[0]) == lbitp;
 					/* prepare for sending first bit */
 					lwmode = lactbit;
+					break;
+				case 0x5A:
+					lmode = OWM_WRITE_PIO;
+					lbytep = 0;
+					//initialize writing position in scratch pad
+					wdata[0] = 0; 
 					break;
 				default:
 					lmode = owCommand(cbuf);
@@ -301,6 +313,16 @@ ISR(TIMER0_OVF_vect)
 					break;
 				}
 				wdata[lbytep] = 0;
+			}
+			break;
+		case OWM_WRITE_PIO:
+			wdata[0] |= lbitp;
+			lbitp = (lbitp << 1);
+			if (!lbitp) {
+				/**/
+				digitalWrite (1, wdata[0] & 0x1);
+				digitalWrite (2, wdata[0] & 0x2);
+				lmode = OWM_SLEEP;
 			}
 			break;
 		case OWM_READ_SCRATCHPAD:
@@ -426,6 +448,10 @@ uint8_t owCommand(uint8_t cmd)
 	case 0x44:	//Start Convert
 		//func |= 0x4;
 		prepareScratch();
+		break;
+	case 0x5A:
+		digitalWrite (cmd & 0xf, LOW);
+		digitalWrite (cmd & 0xf, HIGH);
 		break;
 #if (OW_FAMILY == 0xA3)
 	case 0x70:
@@ -649,8 +675,8 @@ static inline void enablePinInts()
 }
 
 void setup() {
-#ifdef DEBUG
 	int i;
+#ifdef DEBUG
 #endif
 #if defined __AVR_ATmega48__ || defined __AVR_ATmega88__
 #ifdef HAVE_UART
@@ -678,13 +704,13 @@ void setup() {
 
 #ifdef DEBUG
 	printf("\n\rSetup..DDRC=%X PORTC=%X PINC=%X\n\r", DDRC & 0xf, PORTC & 0xf, PINC & 0xf);
+#endif	
 	for (i = 5; i > 1; i--) {
 		digitalWrite(LED, HIGH);
 		delay(25 * i);
 		digitalWrite(LED, LOW);
 		delay(50);
 	}
-#endif	
 }
 
 static inline void owResetSignal()
