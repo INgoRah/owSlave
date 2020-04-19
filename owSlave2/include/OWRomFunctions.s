@@ -71,13 +71,11 @@
 #define OW_FIRST_COMMAND 11
 .comm newid,8
 
-       
 .macro CHANGE_ID_COMMANDS
 	cset 0x75,OW_WRITE_NEWID
 	cljmp 0xA7,hrc_set_readid
 	cljmp 0x79,hrc_set_setid
 .endm
-
 
 #else
 #define OW_FIRST_COMMAND 8

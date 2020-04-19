@@ -57,7 +57,6 @@
 #define TIMER_INTERRUPT TIM0_OVF_vect
 #define PIN_INTERRUPT EXT_INT0_vect
 
-
 //#define OWT_MIN_RESET 160 
 //#define OWT_RESET2 40
 //#define OWT_RESET_PRESENT 15
@@ -162,7 +161,7 @@
 .macro CHECK_BOOTLOADER_PIN  ;r_temp is pushed other Registers should be saved
 ; check for bootloader jumper
 	;vor allen anderen Registerconfigs
-#ifndef _NO_BOOTLOADER_PIN_	
+#ifndef _NO_BOOTLOADER_PIN_
 	ldi r_temp,(1<<PUD) ;enable pullup 
 	out _SFR_IO_ADDR(MCUCR) ,r_temp
 	sbi _SFR_IO_ADDR(PORTA),PINA5 ;internal pullup on PINA5

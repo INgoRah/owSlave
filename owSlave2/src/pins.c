@@ -13,7 +13,7 @@ void initBtn (uint8_t in, struct pinState *p)
 int checkBtn (uint8_t in, struct pinState *p)
 {
 	if (p->last != in) {
-		p->last = !!in;
+		p->last = in;
 		p->state = BTN_UNSTABLE;
 		return BTN_UNSTABLE;
 	}
@@ -28,8 +28,10 @@ int checkBtn (uint8_t in, struct pinState *p)
 		/* button released or was high, check press time */
 		switch (in) {
 		case BTN_PRESSED_LONG:
+			p->press = millis() - p->press;
 			return BTN_RELEASED;
 		case BTN_PRESS_LOW:
+			p->press = millis() - p->press;
 			return BTN_PRESSED;
 		default:
 			return BTN_INVALID;
@@ -51,9 +53,11 @@ int checkBtn (uint8_t in, struct pinState *p)
 		}
 		return BTN_LOW;
 	case BTN_HIGH:
-		return BTN_HIGH;
+		if (in != 0)
+			return BTN_HIGH;
+		/* fall-through */
 	case BTN_UNSTABLE:
-		if (in == LOW)
+		if (in == 0)
 			p->state = BTN_TIMER_LOW;
 		else
 			p->state = BTN_TIMER_HIGH;

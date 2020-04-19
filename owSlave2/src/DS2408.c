@@ -110,8 +110,8 @@
 #define PCMSK PCMSK0
 #define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
 #define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
-#define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; }while(0)
-#define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; }while(0)
+#define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
+#define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
 #endif
 
 extern void OWINIT(void);
@@ -120,7 +120,7 @@ extern uint8_t stat_to_sample;
 
 /* last byte will be calculated */
 uint8_t owid[8] = {0x29, 0xA2, 0xD9, 0x84, 0x00, 0x16, 0x10, 0};
-uint8_t config_info[26] = {0x06, 0x09, 0x06, 0x09, 0x06, 0x09, 0x06, 0x09, 0x02, 20, 20, 20, 20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+uint8_t config_info[26] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 OWST_EXTERN_VARS
 
@@ -151,13 +151,16 @@ typedef union {
 } pack_t;
 volatile pack_t pack;
 
-uint8_t values[10];
+#define CHAN_VALUES 16
+
+uint8_t values[CHAN_VALUES];
 uint8_t ap = 1;
 volatile uint8_t int_signal = 0;
 volatile uint8_t btn_active = 0;
 static uint8_t pin_state = 0xFF;
 static void owResetSignal(void);
 unsigned long _ms;
+static uint8_t led2 = 0;
 
 #if 1 // defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) 
 static void led_flash(void)
@@ -178,7 +181,7 @@ uint8_t crc8(void)
 {
 	uint8_t lscrc = 0x0;
 
-	for (uint8_t i = 0; i < 5; i++) {
+	for (uint8_t i = 0; i < CHAN_VALUES; i++) {
 		uint8_t v = values[i];
 		//if (v==0) v=0xFF;
 		uint8_t bit = 1;
@@ -228,13 +231,8 @@ void delay(unsigned long ms)
 
 static inline void act_latch(uint8_t p, uint8_t mask)
 {
-	if (p)
-		pack.PIO_Logic_State |= mask;
-	else
-		pack.PIO_Logic_State &= ~mask;
-	if ((mask & pack.Conditional_Search_Channel_Selection_Mask) == 0)
-		return;
-	pack.PIO_Activity_Latch_State |= mask;
+	if ((mask & pack.Conditional_Search_Channel_Selection_Mask) != 0)
+		pack.PIO_Activity_Latch_State |= mask;
 }
 
 static inline void pin_change(uint8_t pins, uint8_t p, uint8_t mask)
@@ -305,9 +303,10 @@ ISR(PCINT0_vect) {
 #else
 	pins = PIN_REG;
 #endif
-	if (/*pin_state != pins && */((pins & PIN_PIO2) != (pin_state & PIN_PIO2) ))
+	if (pin_state != pins) {
 		btn_active = 1;
-	pin_state = pins;
+		pin_state = pins;
+	}
 #if defined(GIFR) && defined(PCIF0)
 	GIFR = _BV(PCIF0);
 #endif
@@ -398,7 +397,13 @@ static void owResetSignal(void)
 	int to;
 	uint8_t oldSREG;
 	
-	while (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0));
+	while (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0)) {
+		delay(1);
+		if (to++ > 20)
+			/* try again later */
+			return;
+	};
+#if 0
 	/* not needed, because no timer and mode == 0 indicates high  */
 	do {
 		to = 20;
@@ -408,6 +413,7 @@ static void owResetSignal(void)
 			to--;
 		};
 	} while ((OW_PIN & OW_PINN) == 0 || mode != 0);
+#endif
 	oldSREG = SREG;
 	cli();
 	sbi (OW_DDR, OW_PINN);
@@ -433,7 +439,7 @@ void setup()
 	values[4] = 5;
 	values[6] = 0x00;
 	values[7] = 0x00;
-	values[5] = crc8();
+	values[CHAN_VALUES-1] = crc8();
 
 	owid[7] = crc();
 	for (i = 0;i < MAX_BTN;i++)
@@ -474,13 +480,13 @@ void setup()
 #else
 	_delay_ms(10);
 #endif
-	led_flash();
+	//led_flash();
 }
 
 void ow_loop()
 {
 	if (reset_indicator) {
-		ap=0;
+		ap = 0;
 		// stat_to_sample=0;
 		reset_indicator=0;
 	}
@@ -500,9 +506,8 @@ void ow_loop()
 	}
 	if (gcontrol & 0x4) {
 		stat_to_sample=values[ap];
-		ap++;		
-		if (ap > 5)
-			ap=0;
+		if (ap++ > CHAN_VALUES-1)
+			ap = 0;
 		gcontrol &= ~0x04;
 	}
 	if (gcontrol & 0x8) {
@@ -516,9 +521,8 @@ void ow_loop()
 
 void btn_loop()
 {
-	static uint8_t led2 = 0;
 	int i;
-	uint8_t pins, in, act_btns;
+	uint8_t pins, in, act_btns, mask = 1;
 
 #if defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
 	pins = PINB;
@@ -526,45 +530,71 @@ void btn_loop()
 	pins = PIN_REG;
 #endif
 	act_btns = 0;
-	for (i = 0;i < act_btns;i++) {
-		in = !!(pins & pio_map[i]);
+	for (i = 0; i < MAX_BTN; i++) {
+		int st;
+		struct pinState *p = &btn[i];
 
-		switch (checkBtn(in, &btn[i])) {
+		in = !!(pins & pio_map[i]);
+		st = checkBtn(in, p);
+		values[i] = st;
+		switch (st) {
 		case BTN_PRESSED_LONG:
+			/* active low but for longer time */
+			//LED2_OFF();
 			LED2_OFF();
+			act_btns++;
 			break;
-			/* fall-through */
 		case BTN_PRESSED:
+			/* pressed and done */
+			LED_OFF();
 			if (led2) {
-				led2=0;
 				LED2_OFF();
 			} else {
-				led2=1;
 				LED2_ON();
 			}
+			pack.PIO_Logic_State |= mask;
+			values[i+8] = p->press;
+			act_latch(1, mask);
+			act_btns++;
 			break;
 		case BTN_RELEASED:
+			/* long pressed done */
+			pack.PIO_Logic_State |= mask;
+			values[i+8] = p->press;
+			act_latch(1, mask);
+			act_btns++;
+			break;
+		case BTN_PRESS_LOW:
+			/* intermediate end state, wait for release */
+			pack.PIO_Logic_State &= ~mask;
+			// for push button / switch should go to sleep
+			act_btns++;
+			break;
 		case BTN_HIGH:
-			act_latch(1, (i  + 1) ^ 2);
+			/* means no change */
 			break;
 		case BTN_LOW:
-		case BTN_PRESS_LOW:
-			act_latch(0, (i  + 1) ^ 2);
+			LED_ON();
+			act_btns++;
 			break;
 		/* Internal and intermediate state are ongoing evaluations
-		 * BTN_INVALID BTN_UNSTABLE BTN_TIMER_HIGH BTN_TIMER_LOW
+		 * BTN_PRESS_LOW BTN_INVALID BTN_UNSTABLE BTN_TIMER_HIGH BTN_TIMER_LOW
 		 */
 		default:
-			act_btns ++;
+			//if (p->press < 2000)
+			act_btns++;
 			break;
 		}
+		mask = mask << 1;
 	}
 	if (pack.PIO_Activity_Latch_State && !alarmflag) {
 		alarmflag = 1;
-		int_signal = 1;
+		//int_signal = 1;
 	}
-	if (act_btns == 0)
+	if (act_btns == 0) {
 		btn_active = 0;
+		LED_OFF();
+	}
 }
 
 void loop()
@@ -585,16 +615,16 @@ void loop()
 #endif
 	ow_loop();
 #ifdef PCICR	
-	PCICR |= _BV(PCIE0);
+	//PCICR |= _BV(PCIE0);
 #endif
-	if (btn_active) {
+	/* ongoing OW access, serve data with high prio and skip others */
+	if (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0))
+		return;
+	if (btn_active)
 		btn_loop();
-		delay(1);
-	}
-
 	if (int_signal) {
 		owResetSignal();
-		led_flash();
+		if (!int_signal) led_flash();
 	}
 }
 
@@ -602,12 +632,17 @@ int main(void)
 {
 	setup();
 	while (1) {
-		LED_ON();
 		loop();
-		LED_OFF();
-		if (!int_signal && !btn_active) {
+#if 1
+		delay(1);
+#else
+		if (btn_active || int_signal)
+			delay(1);
+		else {
+			LED_OFF();
 			/* only sleepp if no action pending */
 			OWST_MAIN_END
 		}
+#endif
 	}
 }
