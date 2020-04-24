@@ -99,7 +99,7 @@
 
 #ifdef _CHANGEABLE_ID_
 ; lesen der ID aus dem EEPROM beim Start
-read_EEPROM_ID:  
+read_EEPROM_ID:
 	push r_bytep
 	push r_rwbyte//r_temp2 and Z is not in gnu C save area
 	ldi r_temp2,lo8(E2END)

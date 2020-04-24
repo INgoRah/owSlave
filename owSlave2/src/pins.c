@@ -10,6 +10,15 @@ void initBtn (uint8_t in, struct pinState *p)
 		p->state = BTN_LOW;
 }
 
+int checkPin (uint8_t in, struct pinState *p)
+{
+	if (p->last != in) {
+		p->last = in;
+		return BTN_UNSTABLE;
+	}
+	return in;
+}
+
 int checkBtn (uint8_t in, struct pinState *p)
 {
 	if (p->last != in) {

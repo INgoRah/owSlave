@@ -4,7 +4,6 @@
 /*
  *  Pin/Button configuration
  */
-#define MAX_BTN 1
 #define BTN_MIN_TIME 25
 #define BTN_MINH_TIME 10
 #define BTN_LONG_PRESS_TIME 250
@@ -39,7 +38,7 @@ struct pinState {
 	uint8_t hl_state;
 	uint8_t state;
 	uint8_t last;
-}btn[MAX_BTN];
+};
 
 void initBtn (uint8_t in, struct pinState *p);
 int checkBtn (uint8_t in, struct pinState *p);

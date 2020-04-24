@@ -70,8 +70,6 @@
 #define OW_PIN PINB //1 Wire Pin as number
 #define OW_PINN PORTB2
 #define OW_DDR DDRB  //pin direction register
-
-#define TIMSK TIMSK0
 #endif
 
 #if defined(__AVR_ATtiny85__)
@@ -88,9 +86,12 @@
 #define LED _BV(PB3)
 #define	LED_ON()  do { DDRB |= LED;  PORTB &= ~LED; } while(0)
 #define	LED_OFF() do { DDRB &= ~LED; PORTB |= LED;  } while(0)
+#define	LED2_ON() do {  }while(0)
+#define	LED2_OFF() do { }while(0)
 #endif
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+#define TIMSK TIMSK0
 /* means: 0 is output low, 1 input high (seen from owfs) */
 #define ACTIVE_LOW
 #define PCINT_VECTOR PCINT0_vect
@@ -114,12 +115,19 @@
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
 #endif
 
+#define CHAN_VALUES 6
+#define MAX_BTN 4
+
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
 extern uint8_t stat_to_sample;
+static void owResetSignal(void);
 
-/* last byte will be calculated */
-uint8_t owid[8] = {0x29, 0xA2, 0xD9, 0x84, 0x00, 0x16, 0x10, 0};
+/* last byte will be calculated, program like
+C:\Users\rah\.platformio\packages\tool-avrdude
+avrdude -C C:\Users\rah\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
+ */
+uint8_t owid[8];/* = {0x29, 0x1, 0x1, 0x4, 0x00, 0x16, 0x11, 0};*/
 uint8_t config_info[26] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 OWST_EXTERN_VARS
@@ -151,14 +159,12 @@ typedef union {
 } pack_t;
 volatile pack_t pack;
 
-#define CHAN_VALUES 16
-
+struct pinState btn[MAX_BTN];
 uint8_t values[CHAN_VALUES];
 uint8_t ap = 1;
 volatile uint8_t int_signal = 0;
 volatile uint8_t btn_active = 0;
 static uint8_t pin_state = 0xFF;
-static void owResetSignal(void);
 unsigned long _ms;
 static uint8_t led2 = 0;
 
@@ -249,10 +255,9 @@ static inline void pin_change(uint8_t pins, uint8_t p, uint8_t mask)
 
 /* bit number in PIN register to IO mapping */
 const uint8_t pio_map [] = {
-	PIN_PIO2,
 	PIN_PIO0,
 	PIN_PIO1,
-/*	PIN_PIO2,*/
+	PIN_PIO2,
 	PIN_PIO3,
 #ifdef PIN_PIO4
 	PIN_PIO4,
@@ -394,12 +399,13 @@ void pin_set(uint8_t bb)
 
 static void owResetSignal(void)
 {
-	int to;
+	int to = 10;
 	uint8_t oldSREG;
 	
+	LED_ON();
 	while (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0)) {
 		delay(1);
-		if (to++ > 20)
+		if (to-- == 0)
 			/* try again later */
 			return;
 	};
@@ -421,15 +427,27 @@ static void owResetSignal(void)
 	cbi (OW_DDR, OW_PINN);
 	int_signal = 0;
 	_ms++;
+	/* wait for presence detect pulse from other clients, but after
+	   960 there should be nothing more */
+	to = 10;
+	while ((OW_PIN & OW_PINN) == 0) {
+		_delay_us (100);
+		if (to-- == 0) {
+			_ms++;
+			break;
+		}
+	}
 	SREG = oldSREG;
+	LED_OFF();
 }
 
 void setup()
 {
 	int i;
+	uint8_t id[8];
 
-	pack.FF1 = 0xFF;
-	pack.FF2 = 0xFF;
+	pack.FF1 = 0xDE;
+	pack.FF2 = 0xAD;
 	pack.Status |= 0x80;
 	 //0x0E 0x19 0x48 0x00
 	values[0] = 0x00;
@@ -441,6 +459,12 @@ void setup()
 	values[7] = 0x00;
 	values[CHAN_VALUES-1] = crc8();
 
+	eeprom_read_block((void*)&id, (const void*)0, 8);
+	if (id[0] != 0xFF && id[1] != 0xFF) {
+		for (i = 0; i < 8; i++)
+			owid[i] = id[i];
+		return;
+	}
 	owid[7] = crc();
 	for (i = 0;i < MAX_BTN;i++)
 		initBtn(1, &btn[i]);
@@ -469,14 +493,15 @@ void setup()
 	PCIFR = _BV(PCIF0);
 	PCICR = _BV(PCIE0);
 #endif
-	LED2_ON();
+	LED_ON();
+	pack.Conditional_Search_Channel_Selection_Mask = 0;
 	sync_pins();
 	/* enable alarm state reporting */
 	pack.Conditional_Search_Channel_Selection_Mask = 0xFF;
 	sei();
 #if 1
-	_delay_ms(500);
-	LED2_OFF();
+	_delay_ms(300);
+	LED_OFF();
 #else
 	_delay_ms(10);
 #endif
@@ -536,36 +561,38 @@ void btn_loop()
 
 		in = !!(pins & pio_map[i]);
 		st = checkBtn(in, p);
-		values[i] = st;
+		//values[i] = st;
 		switch (st) {
 		case BTN_PRESSED_LONG:
 			/* active low but for longer time */
-			//LED2_OFF();
 			LED2_OFF();
+			pack.FF1 |= mask;
 			act_btns++;
 			break;
 		case BTN_PRESSED:
 			/* pressed and done */
-			LED_OFF();
 			if (led2) {
 				LED2_OFF();
 			} else {
 				LED2_ON();
 			}
+			pack.FF1 &= ~mask;
+			pack.FF2 = p->press;
 			pack.PIO_Logic_State |= mask;
-			values[i+8] = p->press;
+			//values[i+8] = p->press;
 			act_latch(1, mask);
 			act_btns++;
 			break;
 		case BTN_RELEASED:
 			/* long pressed done */
 			pack.PIO_Logic_State |= mask;
-			values[i+8] = p->press;
+			//values[i+8] = p->press;
 			act_latch(1, mask);
 			act_btns++;
 			break;
 		case BTN_PRESS_LOW:
 			/* intermediate end state, wait for release */
+			pack.FF1 &= ~mask;
 			pack.PIO_Logic_State &= ~mask;
 			// for push button / switch should go to sleep
 			act_btns++;
@@ -574,7 +601,6 @@ void btn_loop()
 			/* means no change */
 			break;
 		case BTN_LOW:
-			LED_ON();
 			act_btns++;
 			break;
 		/* Internal and intermediate state are ongoing evaluations
@@ -589,12 +615,10 @@ void btn_loop()
 	}
 	if (pack.PIO_Activity_Latch_State && !alarmflag) {
 		alarmflag = 1;
-		//int_signal = 1;
+		int_signal = 1;
 	}
-	if (act_btns == 0) {
+	if (act_btns == 0)
 		btn_active = 0;
-		LED_OFF();
-	}
 }
 
 void loop()
@@ -614,26 +638,23 @@ void loop()
 		led_flash();
 #endif
 	ow_loop();
-#ifdef PCICR	
-	//PCICR |= _BV(PCIE0);
-#endif
+
 	/* ongoing OW access, serve data with high prio and skip others */
 	if (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0))
 		return;
 	if (btn_active)
 		btn_loop();
-	if (int_signal) {
+	if (int_signal)
 		owResetSignal();
-		if (!int_signal) led_flash();
-	}
 }
 
 int main(void)
 {
 	setup();
 	while (1) {
+		//LED_ON();
 		loop();
-#if 1
+#if 0
 		delay(1);
 #else
 		if (btn_active || int_signal)
