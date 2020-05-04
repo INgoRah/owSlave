@@ -21,6 +21,8 @@ int checkPin (uint8_t in, struct pinState *p)
 
 int checkBtn (uint8_t in, struct pinState *p)
 {
+	if (in)
+		in = BTN_HIGH;
 	if (p->last != in) {
 		p->last = in;
 		p->state = BTN_UNSTABLE;
@@ -41,6 +43,7 @@ int checkBtn (uint8_t in, struct pinState *p)
 			return BTN_RELEASED;
 		case BTN_PRESS_LOW:
 			p->press = millis() - p->press;
+			p->cnt++;
 			return BTN_PRESSED;
 		default:
 			return BTN_INVALID;

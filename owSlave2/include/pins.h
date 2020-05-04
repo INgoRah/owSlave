@@ -5,8 +5,8 @@
  *  Pin/Button configuration
  */
 #define BTN_MIN_TIME 25
-#define BTN_MINH_TIME 10
-#define BTN_LONG_PRESS_TIME 250
+#define BTN_MINH_TIME 25
+#define BTN_LONG_PRESS_TIME 400
 
 /*
  * Button states
@@ -27,10 +27,6 @@
  */
 #define PIN_LOW 0
 #define PIN_HIGH 1
-#define PIN_CHECK_LOW 2
-#define PIN_CHECK_HIGH 3
-#define PIN_UNSTABLE 4
-#define PIN_FLOAT 5
 
 struct pinState {
 	unsigned long time;
@@ -38,9 +34,12 @@ struct pinState {
 	uint8_t hl_state;
 	uint8_t state;
 	uint8_t last;
+	/* counter of press for debuggin */
+	uint8_t cnt;
 };
 
 void initBtn (uint8_t in, struct pinState *p);
 int checkBtn (uint8_t in, struct pinState *p);
+int checkPin (uint8_t in, struct pinState *p);
 
 #endif /* __PINS */

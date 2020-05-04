@@ -37,12 +37,26 @@
 #include <avr/wdt.h>
 #include <avr/sleep.h>
 #include <avr/pgmspace.h>
+#include <avr/eeprom.h>
 #include "owSlave_tools.h"
 #include "Arduino.h"
 #include "pins.h"
+#ifdef HAVE_UART
+#include "uart.h"
+#include "printf.h"
+#else
+#define printf(...)
+#endif
 
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) 
+#if defined(ATMEGA)
 #define PCINT_VECTOR PCINT0_vect
+#define PCMSK PCMSK0
+#define TIMSK TIMSK0
+
+#define OW_PIN PIND //1 Wire Pin as number
+#define OW_PINN PORTD2
+#define OW_DDR DDRD  //pin direction register
+
 #define PORT_REG PORTC
 #define PIN_REG PINC
 #define PIN_DDR DDRC
@@ -54,19 +68,28 @@
 #define PIN_PIO3 (1<<PINC2)
 #define PIN_PIO4 _BV(PC3)
 #define PIN_PIO5 (1<<PINC4)
-#define LED _BV(PC3)
+#define LED2 _BV(PC3)
+#define LED _BV(PC1)
+
+#define	LED_ON() do { DDRC |= LED;PORTC &= ~LED; }while(0)
+#define	LED_OFF() do {DDRC &= ~LED;PORTC |= LED; }while(0)
+#define	LED2_ON() do { DDRC |= LED2;PORTC &= ~LED2; led2=1; }while(0)
+#define	LED2_OFF() do {DDRC &= ~LED2;PORTC |= LED2; led2=0; }while(0)
 
 #define DOOR 1 /* PC1 */
 #define RING 0 /* PC2 */
 #define RINGIN 7 /* PB1 */
 #define BTNIN 6 /* PB0 */
+
+#define MAX_BTN 2
 #endif
 
 /* All tinies */
 #if defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || \
 	defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || \
 	defined(__AVR_ATtiny84A__) || defined(__AVR_ATtiny85__)
-#define OW_PORT PORTB //1 Wire Port
+#define PCINT_VECTOR PCINT0_vect
+
 #define OW_PIN PINB //1 Wire Pin as number
 #define OW_PINN PORTB2
 #define OW_DDR DDRB  //pin direction register
@@ -74,13 +97,12 @@
 
 #if defined(__AVR_ATtiny85__)
 #define ACTIVE_LOW
-#define PCINT_VECTOR PCINT0_vect
 #define PORT_REG PORTB
 #define PIN_REG PINB
 #define PIN_DDR DDRB
 
 #define PIN_PIO0 _BV(PB4) /* light : ouput */
-#define PIN_PIO1 _BV(PB3)
+#define PIN_PIO1 _BV(PB3) /* LED */
 #define PIN_PIO2 _BV(PB1)
 #define PIN_PIO3 _BV(PB0) /* light switch: input */
 #define LED _BV(PB3)
@@ -88,13 +110,14 @@
 #define	LED_OFF() do { DDRB &= ~LED; PORTB |= LED;  } while(0)
 #define	LED2_ON() do {  }while(0)
 #define	LED2_OFF() do { }while(0)
+
+#define MAX_BTN 4
 #endif
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 #define TIMSK TIMSK0
 /* means: 0 is output low, 1 input high (seen from owfs) */
 #define ACTIVE_LOW
-#define PCINT_VECTOR PCINT0_vect
 #define PIN_REG PINA
 #define PORT_REG PORTA
 #define PIN_DDR DDRA
@@ -113,10 +136,11 @@
 #define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
 #define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
+
+#define MAX_BTN 4
 #endif
 
-#define CHAN_VALUES 6
-#define MAX_BTN 4
+#define CHAN_VALUES 2
 
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
@@ -127,9 +151,10 @@ static void owResetSignal(void);
 C:\Users\rah\.platformio\packages\tool-avrdude
 avrdude -C C:\Users\rah\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
  */
-uint8_t owid[8];/* = {0x29, 0x1, 0x1, 0x4, 0x00, 0x16, 0x11, 0};*/
+uint8_t owid[8] = {0x29, 0x0, 0x48, 0x3, 0x5, 0x66, 0x77, 0};
 uint8_t config_info[26] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
+uint8_t pin_cfg;
+int wdtPcCount = 0;
 OWST_EXTERN_VARS
 
 OWST_WDT_ISR
@@ -152,8 +177,8 @@ typedef union {
 		uint8_t Conditional_Search_Channel_Selection_Mask;
 		uint8_t Conditional_Search_Channel_Polarity_Selection;
 		uint8_t Status; //008D
-		uint8_t FF1;
-		uint8_t FF2;
+		uint8_t FF1; //008E
+		uint8_t FF2; //008F
 
 	};
 } pack_t;
@@ -277,13 +302,16 @@ const uint8_t pio_map [] = {
 static void sync_pins()
 {
 	uint8_t pins;
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
+#if  defined(ATMEGA)
 	pins = PINB;
 #else
 	pins = PIN_REG;
 #endif
 	pin_change(pins, PIN_PIO0, 0x1);
 	pin_change(pins, PIN_PIO1, 0x2);
+#if  defined(ATMEGA)
+	pins = PIN_REG;
+#endif
 	pin_change(pins, PIN_PIO2, 0x4);
 	pin_change(pins, PIN_PIO3, 0x8);
 #ifdef PIN_PIO4
@@ -298,19 +326,25 @@ static void sync_pins()
 #ifdef PIN_PIO7
 	pin_change(pins, PIN_PIO6, 0x40);
 #endif
+#if  defined(ATMEGA)
+	pins = PINB;
+#endif
 	pin_state = pins;
 }
 
 ISR(PCINT0_vect) {
 	uint8_t pins;
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
+#if defined(ATMEGA)
 	pins = PINB;
+	//serial_write('!');
 #else
 	pins = PIN_REG;
 #endif
+	wdtPcCount++;
 	if (pin_state != pins) {
 		btn_active = 1;
 		pin_state = pins;
+		//printf("%02X ", pins);
 	}
 #if defined(GIFR) && defined(PCIF0)
 	GIFR = _BV(PCIF0);
@@ -388,11 +422,7 @@ void pin_set(uint8_t bb)
 			PIN_DDR |= p;
 			PORT_REG &= ~p;
 		}
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
-		pin_change(PINB, p, bb);
-#else
 		pin_change(PIN_REG, p, bb);
-#endif
 	}
 	sei();
 }
@@ -403,6 +433,7 @@ static void owResetSignal(void)
 	uint8_t oldSREG;
 	
 	LED_ON();
+	//serial_write('-');
 	while (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0)) {
 		delay(1);
 		if (to-- == 0)
@@ -425,7 +456,6 @@ static void owResetSignal(void)
 	sbi (OW_DDR, OW_PINN);
 	_delay_us (960);
 	cbi (OW_DDR, OW_PINN);
-	int_signal = 0;
 	_ms++;
 	/* wait for presence detect pulse from other clients, but after
 	   960 there should be nothing more */
@@ -437,8 +467,11 @@ static void owResetSignal(void)
 			break;
 		}
 	}
+	int_signal = 0;
 	SREG = oldSREG;
-	LED_OFF();
+#ifdef HAVE_UART
+	serial_write('>');
+#endif
 }
 
 void setup()
@@ -449,31 +482,16 @@ void setup()
 	pack.FF1 = 0xDE;
 	pack.FF2 = 0xAD;
 	pack.Status |= 0x80;
-	 //0x0E 0x19 0x48 0x00
 	values[0] = 0x00;
-	values[1] = 8;
-	values[2] = 26;
-	values[3] = 0;
-	values[4] = 5;
-	values[6] = 0x00;
-	values[7] = 0x00;
 	values[CHAN_VALUES-1] = crc8();
-
-	eeprom_read_block((void*)&id, (const void*)0, 8);
-	if (id[0] != 0xFF && id[1] != 0xFF) {
-		for (i = 0; i < 8; i++)
-			owid[i] = id[i];
-		return;
-	}
-	owid[7] = crc();
-	for (i = 0;i < MAX_BTN;i++)
-		initBtn(1, &btn[i]);
+	LED_ON();
+#ifdef HAVE_UART
+	serial_init();
+#endif
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWST_INIT_ALL_OFF;
-
 	OWST_EN_PULLUP
-	OWINIT();
-	
+
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 	PCMSK0 = (0xFF - PIN_PIO0);
 	// PCMSK1 for LEDS not used
@@ -484,28 +502,40 @@ void setup()
 	PCMSK = (_BV(PCINT0) | _BV(PCINT1) /*| _BV(PCINT3) | _BV(PCINT4)*/);
 	GIMSK |= (1 << PCIE);
 #endif
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) 
+#if defined(ATMEGA)
 	/* output on relais pins */
 	PIN_DDR |= _BV(PC0) | _BV(PC1);
-	/* set inputs */
+	/* set inputs with pull up */
 	PORTB = _BV(PB0) | _BV(PB1);
 	PCMSK0 = _BV(PCINT0) | _BV(PCINT1);
 	PCIFR = _BV(PCIF0);
-	PCICR = _BV(PCIE0);
+	PCICR = _BV(PCIE0); /* enable port B ints */
 #endif
-	LED_ON();
 	pack.Conditional_Search_Channel_Selection_Mask = 0;
 	sync_pins();
+	for (i = 0;i < MAX_BTN;i++)
+		initBtn(1, &btn[i]);
 	/* enable alarm state reporting */
 	pack.Conditional_Search_Channel_Selection_Mask = 0xFF;
+
+	while (!eeprom_is_ready())
+		_delay_ms(1);
+	eeprom_read_block((void*)&id, (const void*)0, 8);
+	if (id[0] == 0x29 && id[1] != 0xFF) {
+		for (i = 0; i < 7; i++)
+			owid[i] = id[i];
+		pin_cfg = id[7];
+	} else {
+		pin_cfg= 0x0;
+	}
+	owid[7] = crc();
+	printf ("%02x...%02x %02x - %02X\n", owid[1], owid[2], owid[7], pin_cfg);
+
+	OWINIT();
+	
 	sei();
-#if 1
-	_delay_ms(300);
 	LED_OFF();
-#else
-	_delay_ms(10);
-#endif
-	//led_flash();
+	led_flash();
 }
 
 void ow_loop()
@@ -522,12 +552,15 @@ void ow_loop()
 			pin_set(i);
 		}
 		gcontrol &= ~0x01;
+		pack.Status &= ~0x80;
 	}
 	if (gcontrol & 2) {
 		/* OW_RESET_ACTIVITY */
 		pack.PIO_Activity_Latch_State = 0;
 		gcontrol &=  ~0x02;
 		alarmflag = 0;
+		int_signal = 0;
+		pack.Status &= ~0x80;
 	}
 	if (gcontrol & 0x4) {
 		stat_to_sample=values[ap];
@@ -544,12 +577,35 @@ void ow_loop()
 	}
 }
 
+void statusPrint()
+{
+#ifdef HAVE_UART
+	struct pinState *p;
+	int i;
+
+	printf ("\n%d %d %d %d\n", TIMSK & (1<<TOIE0), mode, int_signal, btn_active);
+	for (i = 0; i < MAX_BTN; i++) {
+		p = &btn[i];
+#ifdef ATMEGA
+		if (DDRB & pio_map[i]) {
+#else			
+		if (PIN_DDR & pio_map[i]) {
+#endif		
+			printf ("#%i out\n", i+1);
+		} else 
+		{
+			printf ("#%i %d %d\n", i+1, p->state, p->press);
+		}
+	}
+#endif
+}
+
 void btn_loop()
 {
 	int i;
 	uint8_t pins, in, act_btns, mask = 1;
 
-#if defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
+#if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
 	pins = PINB;
 #else
 	pins = PIN_REG;
@@ -557,17 +613,33 @@ void btn_loop()
 	act_btns = 0;
 	for (i = 0; i < MAX_BTN; i++) {
 		int st;
-		struct pinState *p = &btn[i];
-
+		struct pinState *p;
+#ifdef DEBUG
+		int prev;
+#endif
+#ifdef ATMEGA
+		if (DDRB & pio_map[i]) {
+#else			
+		if (PIN_DDR & pio_map[i]) {
+#endif			
+			mask = mask << 1;
+			continue;
+		}
+		p = &btn[i];
 		in = !!(pins & pio_map[i]);
+#ifdef DEBUG
+		prev = p->state;
+#endif		
 		st = checkBtn(in, p);
-		//values[i] = st;
 		switch (st) {
 		case BTN_PRESSED_LONG:
 			/* active low but for longer time */
 			LED2_OFF();
-			pack.FF1 |= mask;
-			act_btns++;
+			pack.Status |= mask;
+			pack.FF1 = p->press / 8;
+			// get the next edge
+			act_btns |= mask;
+			statusPrint();
 			break;
 		case BTN_PRESSED:
 			/* pressed and done */
@@ -576,54 +648,84 @@ void btn_loop()
 			} else {
 				LED2_ON();
 			}
-			pack.FF1 &= ~mask;
-			pack.FF2 = p->press;
+			pack.FF1 = p->press / 8;
+			pack.Status &= ~mask;
 			pack.PIO_Logic_State |= mask;
-			//values[i+8] = p->press;
 			act_latch(1, mask);
-			act_btns++;
+			printf ("#%i press\n", i);
+			wdtPcCount = 0;
+			if (p->cnt > 10) {
+				p->cnt = 0;
+				statusPrint();
+			}
+			act_btns |= mask;
 			break;
 		case BTN_RELEASED:
 			/* long pressed done */
+			pack.Status |= mask;
+			pack.FF1 = p->press / 8;
 			pack.PIO_Logic_State |= mask;
-			//values[i+8] = p->press;
 			act_latch(1, mask);
-			act_btns++;
+			printf ("#%i release\n", i);
+			wdtPcCount = 0;
+			act_btns |= mask;
 			break;
 		case BTN_PRESS_LOW:
 			/* intermediate end state, wait for release */
-			pack.FF1 &= ~mask;
+			pack.FF1 = 0xFF;
 			pack.PIO_Logic_State &= ~mask;
 			// for push button / switch should go to sleep
-			act_btns++;
+			// sleep and get woken up by pin change
+			act_btns |= mask;
+			if (pin_cfg & mask) {
+				pack.PIO_Logic_State |= mask;
+				act_latch(1, mask);
+			}
+			printf ("btn low\n");
 			break;
 		case BTN_HIGH:
 			/* means no change */
 			break;
 		case BTN_LOW:
-			act_btns++;
+			if (!(pin_cfg & mask))
+				act_btns |= mask;
 			break;
 		/* Internal and intermediate state are ongoing evaluations
 		 * BTN_PRESS_LOW BTN_INVALID BTN_UNSTABLE BTN_TIMER_HIGH BTN_TIMER_LOW
 		 */
 		default:
-			//if (p->press < 2000)
-			act_btns++;
+			act_btns |= mask;
 			break;
 		}
+/*		if (prev != st)
+			printf("%i: %i > %i [%02X]\n", i, prev, st, act_btns);
+*/
 		mask = mask << 1;
 	}
 	if (pack.PIO_Activity_Latch_State && !alarmflag) {
 		alarmflag = 1;
 		int_signal = 1;
 	}
-	if (act_btns == 0)
+	pack.FF2 = act_btns;
+	if (int_signal)
+		pack.FF2 |= 0x80;
+	if (act_btns == 0) {
+		if (btn_active)
+			printf ("btn done\n");
 		btn_active = 0;
+	}
+	// was press time, now for debugging ...
+	pack.FF1 = btn[2].state;
+	if (wdtPcCount > 30) {
+		statusPrint();
+		wdtPcCount = 0;
+	}
 }
 
 void loop()
 {
-#if defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) 
+#if defined(ATMEGA)
+#ifdef DOOR_DEV
 	if ((PINB & PIN_PIO0) == 0) {
 		/* door */
 		PORT_REG |= _BV(PC1);
@@ -637,13 +739,14 @@ void loop()
 	if ((PINB & PIN_PIO1) == 0)
 		led_flash();
 #endif
+#endif
 	ow_loop();
 
+	if (btn_active)
+		btn_loop();
 	/* ongoing OW access, serve data with high prio and skip others */
 	if (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0))
 		return;
-	if (btn_active)
-		btn_loop();
 	if (int_signal)
 		owResetSignal();
 }
@@ -652,18 +755,19 @@ int main(void)
 {
 	setup();
 	while (1) {
-		//LED_ON();
+		LED_ON();
+		wdt_enable(WDTO_1S);
 		loop();
-#if 0
-		delay(1);
-#else
 		if (btn_active || int_signal)
 			delay(1);
 		else {
+			/* only sleep if no action pending */
+			wdt_disable();
 			LED_OFF();
-			/* only sleepp if no action pending */
 			OWST_MAIN_END
+			delayMicroseconds (100);
+			//serial_write('\n');
+			//printf ("%d %d %d %d.. :-|\n", TIMSK & (1<<TOIE0), mode, int_signal, btn_active);
 		}
-#endif
 	}
 }

@@ -91,7 +91,7 @@
 #include "../include/OWSet_ATTINYX4.s"
 #endif
 
-#if  defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__) 
+#if  defined(__AVR_ATmega48__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__) 
 #include "../include/OWSet_ATMEGA168.s"
 #endif 
 

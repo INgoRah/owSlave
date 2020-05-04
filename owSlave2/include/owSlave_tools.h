@@ -20,12 +20,12 @@
 
 #define OWST_MAIN_END \
 	if (((TIMSK & (1<<TOIE0))==0)&& (mode==0))	  {\
-		MCUCR|=(1<<SE)|(1<<SM1);\
-		MCUCR&=~(1<<ISC01);\
+		MCUCR |= (1<<SE)| (1<<SM1);\
+		MCUCR &=~(1<<ISC01);\
 	} else {\
-		MCUCR|=(1<<SE);\
-		MCUCR&=~(1<<SM1);\
-	}\
+		MCUCR |= (1<<SE);\
+		MCUCR &=~ (1<<SM1);\
+	} \
 	asm("SLEEP");
 
 #define OWST_WDT_ISR
@@ -119,7 +119,8 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 
 #endif /* __AVR_ATtinyx4__ */
 
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__)
+#if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
+#define ATMEGA
 #define OWST_INIT_ALL_OFF \
 	PRR|=(1<<PRTWI)|(1<<PRSPI)|(1<<PRADC);  /*Switch off SPI/TWI and adc for save Power*/\
 	ACSR|=(1<<ACD);  /*Disable Comparator*/\
@@ -127,23 +128,20 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 	PORTD |= ~(1<<PIND2); /*Make PullUp an all Pins but not OW_PIN*/\
 
 #define OWST_INIT_ALL_ON \
-PORTB|=~(1<<PINB2)|(1<<PORTB0); /*Make PullUp an all Pins but not OW_PIN*/\
-/*Schalter kann gegen Masse sein und zieht dann immer Strom*/ \
-DDRB|=(1<<PORTB0); /*Als Ausgang und 0*/\
-PORTA|=0xFF;
+	PORTA|=0xFF;
 	
 #define OWST_EN_PULLUP MCUCR &=~(1<<PUD); /*All Pins Pullup...*/
 
 #define OWST_WDT_ISR
+
 #define OWST_MAIN_END \
-	if (((TIMSK0 & (1<<TOIE0))==0)&& (mode==0))	  {\
-		MCUCR|=(1<<SE)|(1<<SM1);\
-		MCUCR&=~(1<<ISC01);\
-	} else {\
-		MCUCR|=(1<<SE);\
-		MCUCR&=~(1<<SM1);\
-	}\
-	asm("SLEEP");
+	if (((TIMSK0 & (1<<TOIE0))==0) && (mode==0)) { \
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN); \
+		EICRA &= ~(1<<ISC01); \
+	} else \
+		set_sleep_mode(SLEEP_MODE_ADC); \
+	} \
+	sleep_cpu();
 
 #endif /* __AVR_ATmegax8x__ */
 
@@ -177,7 +175,7 @@ ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 #define OWST_ADCIN_REFINT 0b0100001
 #endif
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__)
+#if  defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__)
 #define OWST_ADCIN_REFINT 0b00001110
 #endif
 #if  defined(__AVR_ATtiny24__)||defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__)||defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
@@ -185,7 +183,7 @@ ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);
 #define AD_DDR DDRA
 #endif
 
-#if  defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__)
+#if  defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__)
 #define AD_PORT PORTC
 #define AD_DDR DDRC
 #endif
