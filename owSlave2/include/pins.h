@@ -4,9 +4,9 @@
 /*
  *  Pin/Button configuration
  */
-#define BTN_MIN_TIME 25
-#define BTN_MINH_TIME 25
-#define BTN_LONG_PRESS_TIME 400
+#define BTN_MIN_TIME 20
+#define BTN_MINH_TIME 20
+#define BTN_LONG_PRESS_TIME 450
 
 /*
  * Button states

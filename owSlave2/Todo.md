@@ -1,15 +1,14 @@
 #Todo
 
 ## Slave
-fix initial input pin state
-interrupt generation
-2nd timer
-pin validation (25 ms)
+[-] clean up pins. Btn + output or remove fixed outputs (from config)
+[-] auto switch by configuration
+[~] configure hardware (buttons vs. normal pin, active low vs high) and store in eeprom
+[x] fix initial input pin state
 double press
-Owfs iDS2408 - with interrupt, with additional low time measurement or long/short/double press
+[x] Owfs iDS2408 - with interrupt, with additional low time measurement or long/short/double press
 Reduce crc functions
-read ID from eeprom
-configure hardware (buttons vs. normal pin, active low vs high) and store in eeprom
+[x] read ID from eeprom
 
 ## Master
 separate input/output for slew rate control transistor (2n...)
