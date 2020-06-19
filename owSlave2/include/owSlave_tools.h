@@ -19,7 +19,8 @@
 #define OWST_EN_PULLUP MCUCR &=~(1<<PUD); /*All Pins Pullup...*/
 
 #define OWST_MAIN_END \
-	if (((TIMSK & (1<<TOIE0))==0)&& (mode==0))	  {\
+	GIMSK |= (1 << PCIE); \
+	if (((TIMSK & (1<<TOIE0))==0)&& (mode==0)) {\
 		MCUCR |= (1<<SE)| (1<<SM1);\
 		MCUCR &=~(1<<ISC01);\
 	} else {\
@@ -38,8 +39,8 @@
 	PRR|=(1<<PRUSI)|(1<<PRADC);  /*Switch off usi and adc for save Power*/\
 	ACSR|=(1<<ACD);  /*Disable Comparator*/\
 	ADCSRB|=(1<<ACME); /*Disable Analog multiplexer*/\
-	PORTB |= ~(1<<PINB2); /*Make PullUp an all Pins but not OW_PIN*/\
-	PORTA |=0xFF;
+	PORTB = 0; /* |= ~(1<<PINB2)... Make PullUp an all Pins but not OW_PIN*/\
+	PORTA = 0xFF - _BV(PA7);
 
 #define OWST_INIT_ADC_ON \
 PRR|=(1<<PRUSI);  /*Switch off usi and adc for save Power*/\
@@ -108,14 +109,21 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 	}\
 
 #define OWST_MAIN_END \
-	if (((TIMSK0 & (1<<TOIE0))==0)&& (mode==0))	  {\
-		MCUCR|=(1<<SE)|(1<<SM1);\
-		MCUCR&=~(1<<ISC01);\
+	if (((TIMSK0 & (1<<TOIE0))==0)&& (mode==0))	{\
+		MCUCR &= ~(1<<ISC01);\
+	}
+/*
+#define OWST_MAIN_END \
+	GIMSK |= (1 << PCIE0); \
+	if (((TIMSK0 & (1<<TOIE0))==0)&& (mode==0))	{\
+		MCUCR |= (1<<SE)|(1<<SM1);\
+		MCUCR &= ~(1<<ISC01);\
 	} else {\
-		MCUCR|=(1<<SE);\
-		MCUCR&=~(1<<SM1);\
+		MCUCR |= (1<<SE);\
+		MCUCR &= ~(1<<SM1);\
 	}\
 	asm("SLEEP");
+*/
 
 #endif /* __AVR_ATtinyx4__ */
 
@@ -135,12 +143,13 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 #define OWST_WDT_ISR
 
 #define OWST_MAIN_END \
+	PCICR = _BV(PCIE0); \
 	if (((TIMSK0 & (1<<TOIE0))==0) && (mode==0)) { \
-		set_sleep_mode(SLEEP_MODE_PWR_DOWN); \
 		EICRA &= ~(1<<ISC01); \
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN); \
 	} else \
 		set_sleep_mode(SLEEP_MODE_ADC); \
-	} \
+	sleep_enable(); \
 	sleep_cpu();
 
 #endif /* __AVR_ATmegax8x__ */

@@ -62,13 +62,13 @@
 #define OW_READROM 5
 #define OW_READ_COMMAND 6
 #define OW_FWCONFIGINFO 7
-
+#define OW_FWWRITECONFIG 8
 
 #ifdef _CHANGEABLE_ID_
-#define OW_WRITE_NEWID 8
-#define OW_READ_NEWID 9
-#define OW_SET_NEWID 10
-#define OW_FIRST_COMMAND 11
+#define OW_WRITE_NEWID 9
+#define OW_READ_NEWID 10
+#define OW_SET_NEWID 11
+#define OW_FIRST_COMMAND 12
 .comm newid,8
 
 .macro CHANGE_ID_COMMANDS
@@ -78,7 +78,7 @@
 .endm
 
 #else
-#define OW_FIRST_COMMAND 8
+#define OW_FIRST_COMMAND 9
 #endif
 
 #ifndef _DIS_FLASH_
@@ -93,6 +93,7 @@
 #endif
 
 .macro FW_CONFIG_INFO
+	cset 0x75,OW_FWWRITECONFIG
 	cljmp 0x85,hrc_fw_configinfo
 .endm
 
@@ -142,6 +143,7 @@ handle_stable:
 		rjmp h_readrom
 		rjmp h_readcommand 
 		rjmp h_fwconfiginfo
+		rjmp h_fwwriteconfig
 #ifdef _CHANGEABLE_ID_
 		rjmp h_writeid
 		rjmp h_readid
@@ -341,6 +343,16 @@ h_fwconfiginfo_crc:
 h_fwconfiginfo_all:
 	rjmp handle_end_sleep
 
+h_fwwriteconfig:
+	configZ config_info,r_bytep
+	st   Z,r_rwbyte
+	cpi  r_bytep,6
+	breq h_writeconfig_all
+	rjmp handle_end_inc
+h_writeconfig_all:
+	ldi r_temp,16
+	sts gcontrol,r_temp
+	rjmp handle_end_sleep
 
 ;---------------------------------------------------
 ;   CHANGE ROM FUNCTIONS
