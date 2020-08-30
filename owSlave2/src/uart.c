@@ -20,8 +20,9 @@ void serial_init(void)
 
 void serial_write(unsigned char c)
 {
+#ifndef AVRSIM
 	while ( !(UCSR0A & (1 << UDRE0)) )
-		;
+#endif		;
 	UDR0 = c;
 }
 
