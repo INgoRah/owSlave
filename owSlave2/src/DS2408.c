@@ -50,107 +50,7 @@
 #define printf(...)
 #endif
 
-#if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
-#define ATMEGA
-#endif
-#if defined(ATMEGA)
-#define PCINT_VECTOR PCINT0_vect
-#define PCMSK PCMSK0
-#define TIMSK TIMSK0
-
-#define OW_PIN PIND //1 Wire Pin as number
-#define OW_PINN PORTD2
-#define OW_DDR DDRD  //pin direction register
-
-#define PORT_REG PORTC
-#define PIN_REG PINC
-#define PIN_DDR DDRC
-
-#define PIN_PIO0 (1<<PINB0) /* BTNIN */
-#define PIN_PIO1 (1<<PINB1) /* RINGIN */
-
-#define PIN_PIO2 (1<<PINC1)
-#define PIN_PIO3 (1<<PINC2)
-#define PIN_PIO4 _BV(PC3)
-#define PIN_PIO5 (1<<PINC4)
-#define LED2 _BV(PC3)
-#define LED _BV(PC1)
-
-#define	LED_ON() do { DDRC |= LED;PORTC &= ~LED; }while(0)
-#define	LED_OFF() do {DDRC &= ~LED;PORTC |= LED; }while(0)
-#define	LED2_ON() do { DDRC |= LED2;PORTC &= ~LED2; led2=1; }while(0)
-#define	LED2_OFF() do {DDRC &= ~LED2;PORTC |= LED2; led2=0; }while(0)
-
-#define DOOR 1 /* PC1 */
-#define RING 0 /* PC2 */
-#define RINGIN 7 /* PB1 */
-#define BTNIN 6 /* PB0 */
-
-#define MAX_BTN 2
-#endif
-
-/* All tinies */
-#if defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || \
-	defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || \
-	defined(__AVR_ATtiny84A__) || defined(__AVR_ATtiny85__)
-#define PCINT_VECTOR PCINT0_vect
-
-#define OW_PIN PINB //1 Wire Pin as number
-#define OW_PINN PORTB2
-#define OW_DDR DDRB  //pin direction register
-#endif
-
-#if defined(__AVR_ATtiny85__)
-#define ACTIVE_LOW
-#define PORT_REG PORTB
-#define PIN_REG PINB
-#define PIN_DDR DDRB
-
-#define PIN_PIO0 _BV(PB4) /* light : ouput */
-#define PIN_PIO1 _BV(PB3) /* LED */
-#define PIN_PIO2 _BV(PB1)
-#define PIN_PIO3 _BV(PB0) /* light switch: input */
-#define LED _BV(PB3)
-#define	LED_ON()  do { DDRB |= LED;  PORTB &= ~LED; } while(0)
-#define	LED_OFF() do { DDRB &= ~LED; PORTB |= LED;  } while(0)
-#define	LED2_ON() do {  }while(0)
-#define	LED2_OFF() do { }while(0)
-
-#define MAX_BTN 2
-#endif
-
-#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
-#define TIMSK TIMSK0
-/* means: 0 is output low, 1 input high (seen from owfs) */
-#define ACTIVE_LOW
-#define PIN_REG PINA
-#define PORT_REG PORTA
-#define PIN_DDR DDRA
-
-#define PIN_PIO0 (1<<PINA1)	// predefined output 1
-#define PIN_PIO1 (1<<PINA0)	// predefined output 2
-#define PIN_PIO2 (1<<PINA2)
-#define PIN_PIO3 (1<<PINA3)
-#define PIN_PIO4 (1<<PINA4)
-#define PIN_PIO5 (1<<PINA5)
-#define PIN_PIO6 (1<<PINA6)
-#define LED _BV(PB1)
-#define LED2 _BV(PB0)
-
-#define PCMSK PCMSK0
-#define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
-#define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
-#define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
-#define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
-
-#define MAX_BTN 7
-#endif
-
-#define CHAN_VALUES 16
-
-#define SIG_NO 0
-#define SIG_ACT 1
-#define SIG_ARM 2
+#include "DS2408.h"
 
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
@@ -161,30 +61,14 @@ OWST_EXTERN_VARS
 
 OWST_WDT_ISR
 
-typedef union {
-	volatile uint8_t bytes[0x20];
-	struct {
-		/* Actual states of the IOs read via command F0 or F5 / reg adr 88 */
-		uint8_t PIO_Logic_State;
-		/* The data in this register represents the latest data
-		 * written to the PIO through the Channel-access Write
-		 * command 5A / reg adr 89
-		 */
-		uint8_t PIO_Output_Latch_State;
-		/*
-		 * The data in this register represents the current state of
-		 * the PIO activity latches
-		 */
-		uint8_t PIO_Activity_Latch_State;
-		uint8_t Conditional_Search_Channel_Selection_Mask;
-		uint8_t Conditional_Search_Channel_Polarity_Selection;
-		uint8_t Status; //008D
-		uint8_t FF1; //008E
-		uint8_t FF2; //008F
 
-	};
-} pack_t;
-volatile pack_t pack;
+void statusPrint();
+
+/* last byte will be calculated, program like
+C:\Users\rah\.platformio\packages\tool-avrdude
+avrdude -C C:\Users\rah\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
+		 */
+uint8_t owid[8];
 
 /* bit number in PIN register to IO mapping */
 const uint8_t pio_map [] = {
@@ -207,21 +91,7 @@ const uint8_t pio_map [] = {
 	0
 };
 
-void statusPrint();
-
-/* last byte will be calculated, program like
-C:\Users\rah\.platformio\packages\tool-avrdude
-avrdude -C C:\Users\rah\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
- */
-uint8_t owid[8];
-
-#define VERSION 1
-
-#define CFG_BTN_ID 0
-#define CFG_PIN_ID 1
-#define CFG_POL_ID 2
-#define CFG_SW_ID 3
-#define CFG_VERS_ID 11
+volatile pack_t pack;
 
 /*
  * config from EEPROM
@@ -250,9 +120,9 @@ volatile uint8_t btn_active = 0;
 volatile uint8_t pin_state;
 static uint8_t led2 = 0;
 
-#if 1 // defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) 
 static void led_flash(void)
 {
+#ifndef AVRSIM // defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) 
 	int i, j;
 
 	for (i = 4; i > 1; i--) {
@@ -262,8 +132,8 @@ static void led_flash(void)
 		LED_OFF();
 		_delay_ms(50);
 	}
-}
 #endif
+}
 
 static uint8_t crc(uint8_t* input, uint8_t len) {
 	unsigned char inbyte, crc = 0;
@@ -291,6 +161,9 @@ unsigned long millis()
 
 void delay(unsigned long ms)
 {
+#ifdef AVRSIM
+	return;
+#endif
 	while (ms > 0) {
 		_delay_ms(1);
 		_ms++;
@@ -333,16 +206,10 @@ static inline void pin_change(uint8_t pins, uint8_t p, uint8_t mask)
 static void sync_pins()
 {
 	uint8_t pins;
-#if  defined(ATMEGA)
-	pins = PINB;
-#else
 	pins = PIN_REG;
-#endif
+
 	pin_sync_ls(pins, PIN_PIO0, 0x1);
 	pin_sync_ls(pins, PIN_PIO1, 0x2);
-#if  defined(ATMEGA)
-	pins = PIN_REG;
-#endif
 	pin_sync_ls(pins, PIN_PIO2, 0x4);
 	pin_sync_ls(pins, PIN_PIO3, 0x8);
 #ifdef PIN_PIO4
@@ -355,23 +222,17 @@ static void sync_pins()
 	pin_sync_ls(pins, PIN_PIO6, 0x40);
 #endif
 #ifdef PIN_PIO7
-	pin_sync_ls(pins, PIN_PIO6, 0x40);
-#endif
-#if  defined(ATMEGA)
-	pins = PINB;
+	pin_sync_ls(pins, PIN_PIO7, 0x80);
 #endif
 	pin_state = pins & (~PIN_DDR);
 }
 
 ISR(PCINT0_vect) {
 	uint8_t pins;
-#if defined(ATMEGA)
-	pins = PINB;
-#else
+
 	pins = PIN_REG;
 	// remove LED and output
 	pins &= (~PIN_DDR);
-#endif
 
 	if (pin_state != pins) {
 #ifdef WDT_ENABLED
@@ -481,11 +342,7 @@ void pin_set(uint8_t bb)
 #if defined(GIFR) && defined(PCIF)
 	GIFR = _BV(PCIF);
 #endif
-#if  defined(ATMEGA)
-	pin_state = PINB;
-#else
 	pin_state = PIN_REG & (~PIN_DDR);
-#endif
 	sei();
 }
 
@@ -525,48 +382,48 @@ void setup()
 {
 	int i;
 	uint8_t id[9];
+#ifndef AVRSIM
 	int to = 100;
-
+#endif
 	/* all off */
 	pack.PIO_Logic_State = 0xff;
 	pack.PIO_Output_Latch_State = 0xff;
 	pack.FF1 = 0xDE;
 	pack.FF2 = 0xAD;
-	pack.Status |= 0x80;
+	pack.Status = 0x80;
 	OWST_INIT_ALL_OFF;
 	OWST_EN_PULLUP
 	LED_ON();
 #ifdef HAVE_UART
 	serial_init();
 #endif
+#ifndef AVRSIM
 	while (!eeprom_is_ready() && to--)
 		_delay_ms(1);
 	eeprom_read_block((void*)&id, (const void*)0, 9);
+#endif
 	if (id[0] == 0x29 && id[1] != 0xFF) {
 		for (i = 0; i < 7; i++)
 			owid[i] = id[i];
 	}
+	owid[3] = ~owid[1];
+	owid[4] = ~owid[2];
+
 	owid[7] = crc(owid, 7);
+#ifndef AVRSIM
 	eeprom_read_block((void*)&config_info, (const void*)7, 24);
+#endif
 	config_info[CFG_VERS_ID] = VERSION;
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 
-#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__) || defined(ATMEGA)
 	/* ignoring changes on output */
 	PCMSK0 = (0xFF - PIN_PIO0 - PIN_PIO1);
 #endif
 #if defined(__AVR_ATtiny85__)
 	/* PIN_DDR |= PIN_PIO0 | PIN_PIO1; */
 	PCMSK = (_BV(PCINT0) | _BV(PCINT1) /* | _BV(PCINT3) | _BV(PCINT4)*/);
-#endif
-#if defined(ATMEGA)
-	/* output on relais pins */
-	PIN_DDR |= _BV(PC0) | _BV(PC1);
-	/* set inputs with pull up */
-	PORTB = _BV(PB0) | _BV(PB1);
-	PCMSK0 = _BV(PCINT0) | _BV(PCINT1);
-	PCICR = _BV(PCIE0); /* enable port B ints */
 #endif
 	sync_pins();
 	for (i = 0;i < MAX_BTN;i++)
@@ -615,6 +472,7 @@ void ow_loop()
 		/* OW_RESET_ACTIVITY */
 		cli();
 		pack.PIO_Activity_Latch_State = 0;
+		pack.Status = 0;
 		gcontrol &=  ~0x02;
 		alarmflag = 0;
 		int_signal = SIG_ARM;
@@ -656,14 +514,9 @@ void statusPrint()
 	printf ("\n%d %d %d %d\n", TIMSK & (1<<TOIE0), mode, int_signal, btn_active);
 	for (i = 0; i < MAX_BTN; i++) {
 		p = &btn[i];
-#ifdef ATMEGA
-		if (DDRB & pio_map[i]) {
-#else			
 		if (PIN_DDR & pio_map[i]) {
-#endif		
 			printf ("#%i out\n", i+1);
-		} else 
-		{
+		} else {
 			printf ("#%i %d %d\n", i+1, p->state, p->press);
 		}
 	}
@@ -676,11 +529,7 @@ void btn_loop()
 	uint8_t pins, in, act_btns, mask = 1, out;
 	static int stPrints = 50;
 
-#if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
-	pins = PINB;
-#else
 	pins = PIN_REG;
-#endif
 	act_btns = 0;
 	for (i = 0; i < MAX_BTN; i++) {
 		int st;
@@ -688,11 +537,7 @@ void btn_loop()
 #ifdef DEBUG
 		int prev;
 #endif
-#ifdef ATMEGA
-		if (DDRB & pio_map[i]) {
-#else
 		if (PIN_DDR & pio_map[i]) {
-#endif
 			mask = mask << 1;
 			continue;
 		}
@@ -785,9 +630,6 @@ void btn_loop()
 		if ((pack.PIO_Activity_Latch_State & signal_cfg) && int_signal == SIG_ARM)
 			int_signal = SIG_ACT;
 	}
-	pack.FF2 = act_btns;
-	if (int_signal == SIG_ACT)
-		pack.FF2 |= 0x80;
 	values[5] = act_btns;
 	if (act_btns == 0) {
 		btn_active = 0;
@@ -833,7 +675,7 @@ void loop()
 #endif
 }
 
-#ifdef UNIT_TEST
+#if defined(UNIT_TEST) || defined(AVRSIM)
 int main_func(void)
 #else
 int main(void)
