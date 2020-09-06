@@ -1,6 +1,13 @@
 #ifndef DS2408_H
 #define DS2408_H
 
+#ifndef WITH_LEDS
+#define	LED_ON() do { ; } while(0)
+#define	LED_OFF() do { ; } while(0)
+#define	LED2_ON() do { ; } while(0)
+#define	LED2_OFF() do { ; } while(0)
+#endif
+
 #if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
 #define ATMEGA
 #endif
@@ -14,7 +21,11 @@
 #define OW_DDR DDRD  //pin direction register
 
 #define PORT_REG PORTB
+#ifdef AVRSIM
+#define PIN_REG PORTB
+#else
 #define PIN_REG PINB
+#endif
 #define PIN_DDR DDRB
 
 #define PIN_PIO0 (1<<PINB0)
@@ -32,7 +43,9 @@
 #define	LED2_ON() do { DDRC |= LED2;PORTC &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRC &= ~LED2;PORTC |= LED2; led2=0; }while(0)
 
+#ifndef MAX_BTN
 #define MAX_BTN 4
+#endif /* ifndef MAX_BTN */
 #endif
 
 /* All tinies */
@@ -84,11 +97,12 @@
 #define LED2 _BV(PB0)
 
 #define PCMSK PCMSK0
+#ifdef WITH_LEDS
 #define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
 #define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
 #define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
-
+#endif
 #define MAX_BTN 7
 #endif
 
