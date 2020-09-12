@@ -19,15 +19,11 @@
 #define OWST_EN_PULLUP MCUCR &=~(1<<PUD); /*All Pins Pullup...*/
 
 #define OWST_MAIN_END \
-	GIMSK |= (1 << PCIE); \
 	if (((TIMSK & (1<<TOIE0))==0)&& (mode==0)) {\
-		MCUCR |= (1<<SE)| (1<<SM1);\
-		MCUCR &=~(1<<ISC01);\
-	} else {\
-		MCUCR |= (1<<SE);\
-		MCUCR &=~ (1<<SM1);\
-	} \
-	asm("SLEEP");
+		MCUCR &=~(1<<ISC01);					\
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN);	\
+	} else										\
+		set_sleep_mode(SLEEP_MODE_IDLE);
 
 #define OWST_WDT_ISR
 

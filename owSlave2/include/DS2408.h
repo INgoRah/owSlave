@@ -66,15 +66,16 @@
 #define PIN_DDR DDRB
 
 #define PIN_PIO0 _BV(PB4) /* light : ouput */
-#define PIN_PIO1 _BV(PB3) /* LED */
+#define PIN_PIO1 _BV(PB3)
 #define PIN_PIO2 _BV(PB1)
 #define PIN_PIO3 _BV(PB0) /* light switch: input */
 #define LED _BV(PB3)
+#ifdef WITH_LEDS
 #define	LED_ON()  do { DDRB |= LED;  PORTB &= ~LED; } while(0)
 #define	LED_OFF() do { DDRB &= ~LED; PORTB |= LED;  } while(0)
 #define	LED2_ON() do {  }while(0)
 #define	LED2_OFF() do { }while(0)
-
+#endif
 #define MAX_BTN 2
 #endif
 

@@ -74,8 +74,8 @@
 #define OWT_RESET2 80
 #define OWT_RESET_PRESENT 30
 #define OWT_PRESENT 130
-#define OWT_WRITE 35
-#define OWT_READ 12
+#define OWT_WRITE 50 // was 33, should be even 55
+#define OWT_READ 14 // was 12, set to 14 for longer lines??
 #define OWT_ZP_WAIT_LOW_TO 60  ; Zeit fuer die Maximale Lowzeit bei der Zerro Polling pruefung. Ist die Leitung laenger low, ist es vieleicht ein Reset 
 #define OWT_ZP_WAIT_HIGH_TO 90 ; Zeit fuer die Maximale Hight zeit bis zu einem Low Impuls vom Master. Nach laengeren Pausen wird nicht mehr gepollt sondern der Interrup vererndet.
 #endif

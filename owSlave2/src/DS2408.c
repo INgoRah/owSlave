@@ -97,7 +97,7 @@ volatile pack_t pack;
 
 /*
  * config from EEPROM
- * | btn | pin | pol | sw0 |  sw1 |  sw2 | sw3 | sw4 | sw5 | sw6 | sw7 | vers |
+ * | btn | pin | pol | sw0 |  sw1 |  sw2 | sw3 | sw4 | sw5 | sw6 | sw7 | cfg0 | cfg1 | cfg2 | vers |
  * btn: 0 means a push button (based on real port pin mask)
  *      1 represents a simple input with bouncing, no press button
  * pin: a 1 represents input (with change detection), 0: output
@@ -109,6 +109,9 @@ volatile pack_t pack;
  *          value: PIO bit number (starting from 1)) corresponding
  * 					to PIO_Output_Latch_State
  *      No latch will be set on input, but only on output switch
+ * cfg*: special function (0xff: no)
+		1: PWM
+ *      * - pio number (starting from 0)
  * vers: Version
  */
 uint8_t config_info[26] = {0x0};
@@ -441,58 +444,69 @@ void reg_init(void)
 #endif
 }
 
-void setup()
+void cfg_init(void)
 {
-	int i;
-	uint8_t id[9];
+#ifdef _CHANGEABLE_ID_
+	uint8_t crc_check;
+#endif
 #ifndef AVRSIM
 	int to = 100;
-#endif
-	OWST_INIT_ALL_OFF;
-	OWST_EN_PULLUP
-#ifdef WDT_ENABLED
-	if (MCUSR & _BV(WDRF)) {
-		/* Watchdog occured */
-		LED2_ON();
-		wdt_disable();
-		MCUSR = 0;
-		pack.Status = 0x88;
-	}
-	else
-#endif
-		pack.Status = 0x80;
-#ifdef HAVE_UART
-	serial_init();
-#endif
-#ifndef AVRSIM
+
 	/* let power stabalize */
 	/*_delay_ms(20); */
 	while (!eeprom_is_ready() && to--)
 		_delay_ms(1);
-	eeprom_read_block((void*)&id, (const void*)0, 7);
+
+	eeprom_read_block((void*)owid, (const void*)0, 7);
 #endif
-	if (id[0] == 0x29 && id[1] != 0xFF) {
-		for (i = 0; i < 7; i++)
-			owid[i] = id[i];
-	} else {
-		id[0] = 0x29;
-		id[1] = 42;
-		id[2] = 0;
-		id[5] = 0x66;
-		id[6] = 0x77;
+	if (owid[3] != ~owid[1]) {
+		owid[3] = ~owid[1];
+		owid[4] = ~owid[2];
+		owid[7] = crc(owid, 7);
 	}
-	owid[3] = ~owid[1];
-	owid[4] = ~owid[2];
-	owid[7] = crc(owid, 7);
+#ifdef _CHANGEABLE_ID_
+	crc_check = eeprom_read_byte((const uint8_t*)E2END);
+	if (crc_check != 0xff)
+		eeprom_write_block((const void*)owid, (void*)E2END - 7, 8);
+#endif
 #ifndef AVRSIM
 	eeprom_read_block((void*)&config_info, (const void*)7, CFG_VERS_ID);
 #endif
 	config_info[CFG_VERS_ID] = VERSION;
+}
+
+void setup()
+{
+#ifdef WDT_ENABLED
+	uint8_t mcusr_old;
+#endif
+#ifdef WDT_ENABLED
+	/* the watchdog timer remains active even after a system reset (except a
+	 * power-on condition), using the fastest prescaler value.
+	 * It is therefore required to turn off the watchdog early
+     * during program startup */
+	mcusr_old = MCUSR;
+	MCUSR = 0;
+	wdt_disable();
+	if (mcusr_old & _BV(WDRF)) {
+		/* Watchdog occured */
+		pack.Status = 0x88;
+		LED2_ON();
+	}
+	else
+#endif
+		pack.Status = 0x80;
+	OWST_INIT_ALL_OFF;
+	OWST_EN_PULLUP
+#ifdef HAVE_UART
+	serial_init();
+#endif
+	cfg_init();
 	reg_init();
 	var_init();
 #ifdef WDT_ENABLED
 	/* Enable WDT Interrupt*/
-	WDTCSR |= _BV(WDIE);
+	//WDTCSR |= _BV(WDIE);
 	//wdt_enable(WDTO_4S);
 #endif
 	sei();
