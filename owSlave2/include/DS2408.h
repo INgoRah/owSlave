@@ -21,7 +21,7 @@
 #define OW_DDR DDRD  //pin direction register
 
 #define PORT_REG PORTB
-#ifdef AVRSIM
+#ifdef TST_AVRSIM
 #define PIN_REG PORTB
 #else
 #define PIN_REG PINB
@@ -38,10 +38,12 @@
 #define LED2 _BV(PC3)
 #define LED _BV(PC1)
 
+#ifdef WITH_LEDS
 #define	LED_ON() do { DDRC |= LED;PORTC &= ~LED; }while(0)
 #define	LED_OFF() do {DDRC &= ~LED;PORTC |= LED; }while(0)
 #define	LED2_ON() do { DDRC |= LED2;PORTC &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRC &= ~LED2;PORTC |= LED2; led2=0; }while(0)
+#endif
 
 #ifndef MAX_BTN
 #define MAX_BTN 4
@@ -113,12 +115,48 @@
 #define SIG_ACT 1
 #define SIG_ARM 2
 
-#define VERSION 1
+#define MIN_VERSION 1
+#define MAJ_VERSION 1
+/** 0 means a push button (based on real port pin mask).
+ * A state change (alarm) is signaled on releasing the button. 
+ * 1 represents a simple input with bouncing, no press button
+ * A state change (alarm) is signaled on low and high. 
+ */
 #define CFG_BTN_ID 0
 #define CFG_PIN_ID 1
+/**  A 1 represents normal polarity (open collector).
+ *   (based on real port pin mask).
+ * Set 0 = conducting, on, pin active low 
+ * set 1 / non-conducting (off), input
+ * A 0 means reversed polarity for transistor output:
+ * Set 0 = on, pin is active high (no input)
+ * Set 1 = off, inactive, pin is in high resistive not
+ *         driving high, no pullup
+ * Logic state represents the transistor output, not pin output
+ */
 #define CFG_POL_ID 2
-#define CFG_SW_ID 3
-#define CFG_VERS_ID 11
+/** Auto switch config for each PIO
+ *  0xff = default / off
+ * */
+#define CFG_SW_ID 3  /* .. 10 */
+/** PIO configuration
+ *  1 = PWM
+ *  0xff = default
+ * */
+#define CFG_CFG_ID 11 /* .. 18 */
+/* 19 */
+/* 20 */
+#define CFG_VERS_ID 21
+/** Type: 0 - ATiny84 v1
+ * 		  1 - ATiny84 v2
+ *  	  2 - ATiny85 v1
+ * 		  3 - ATiny84 custom
+ * 		  4 - ATMega v1
+ */
+#define CFG_TYPE_ID 23
+
+#define CFG_PIN_PWM 1
+#define CFG_PIN_DEF 0xff
 
 typedef union {
 	volatile uint8_t bytes[0x20];

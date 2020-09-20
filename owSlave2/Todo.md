@@ -10,10 +10,10 @@ Reduce crc functions
 [ ] store new config / custom command or newid command feature
 [?] test mode
 [ ] regression testing signal generation and improvements (bus detection and delay)
-[ ] watchdog for long button press (or no end state after 2 secs), mode != 0 and signal not acknowledged.
+[x] watchdog for long button press (or no end state after 2 secs), mode != 0 and signal not acknowledged.
 
 ## Bugs
-[ ] Initial boot up not showing in search
+[x] Initial boot up not showing in search
 
 # Master
 

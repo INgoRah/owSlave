@@ -129,11 +129,6 @@ read_EEPROM_ID_end:
 	ret
 #endif
 
-
-
-
-
-
 handle_stable: 
 		rjmp handle_end_no_bcount // sleep eventuell reset, nichts tun und auf Timeout warten
 		rjmp h_readromcommand 
@@ -150,8 +145,6 @@ handle_stable:
 		rjmp h_setid
 #endif
 		COMMAND_TABLE
-
-
 
 h_readromcommand:
 	clr r_bytep
@@ -346,7 +339,7 @@ h_fwconfiginfo_all:
 h_fwwriteconfig:
 	configZ config_info,r_bytep
 	st   Z,r_rwbyte
-	cpi  r_bytep,6
+	cpi  r_bytep,22
 	breq h_writeconfig_all
 	rjmp handle_end_inc
 h_writeconfig_all:

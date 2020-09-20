@@ -97,7 +97,9 @@ volatile pack_t pack;
 
 /*
  * config from EEPROM
- * | btn | pin | pol | sw0 |  sw1 |  sw2 | sw3 | sw4 | sw5 | sw6 | sw7 | cfg0 | cfg1 | cfg2 | vers |
+ * | btn | pin | pol | sw0 |  sw1 |  sw2 | sw3 | sw4 | sw5 | sw6 | sw7 |
+ *   cfg0 | cfg1 | cfg2 | cfg3 |cfg4 | cfg5| cfg6 | cfg7 | x |
+ *   maj_vers | min_vers | type
  * btn: 0 means a push button (based on real port pin mask)
  *      1 represents a simple input with bouncing, no press button
  * pin: a 1 represents input (with change detection), 0: output
@@ -112,7 +114,13 @@ volatile pack_t pack;
  * cfg*: special function (0xff: no)
 		1: PWM
  *      * - pio number (starting from 0)
- * vers: Version
+ * maj_vers: Major Version
+ * min_vers: Minor Version
+ * type: 0 - ATiny84 v1
+ *  	 1 - ATiny84 v2
+ *  	 2 - ATiny85 v1
+ *  	 3 - ATiny84 custom
+ *  	 4 - ATMega v1
  */
 uint8_t config_info[26] = {0x0};
 uint8_t signal_cfg;
@@ -193,13 +201,16 @@ static inline void act_latch(uint8_t p, uint8_t mask)
 
 static inline void pin_sync_ls(uint8_t pins, uint8_t p, uint8_t mask)
 {
+	if ((config_info[CFG_POL_ID] & p) == 0)
+		/* ignore logic state here cause inverted and set before */
+		return;
 	if (pins & p)
 		pack.PIO_Logic_State |= mask;
 	else
 		pack.PIO_Logic_State &= ~mask;
 }
 
-static inline void pin_change(uint8_t pins, uint8_t p, uint8_t mask)
+static inline void latch_state(uint8_t pins, uint8_t p, uint8_t mask)
 {
 #if 0
 	if (pins & p)
@@ -276,9 +287,59 @@ ISR(PCINT0_vect) {
 #endif
 }
 
-void pin_set(uint8_t bb)
+void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 {
-	uint8_t p = 0;
+	if (pack.PIO_Output_Latch_State & bb) {
+		/* According to spec:
+		 * set 1 / non-conducting (off)
+		 * set to input or inactive
+		 */
+		if (config_info[CFG_CFG_ID + id] == CFG_PIN_PWM ||
+			(config_info[CFG_POL_ID] & p) == 0) {
+			/* no pull up */
+			PIN_DDR |= p;
+			PORT_REG &= ~p;
+			pack.PIO_Logic_State |= bb;
+			if (config_info[CFG_CFG_ID + id] == 1)
+#if defined(__AVR_ATtiny85__)
+				GTCCR &= ~(1<<PWM1B);
+#else
+				;
+#endif
+		} else {
+			/* enable pull up */
+			PIN_DDR &= ~(p);
+			PORT_REG |= (p);
+			PCMSK |= p;
+		}
+	} else {
+		/* set 0 / 0 = conducting (on) */
+		PCMSK &= ~(p);
+		if ((config_info[CFG_POL_ID] & p) == 0) {
+			/* set output and high on 0 */
+			PIN_DDR |= p;
+			PORT_REG |= (p);
+			pack.PIO_Logic_State &= ~bb;
+		} else {
+			/* set output and low on 0 */
+			PIN_DDR |= p;
+			PORT_REG &= ~p;
+		}
+		if (config_info[CFG_CFG_ID + id] != 0xff) {
+#if defined(__AVR_ATtiny85__)
+			OCR1B = (pack.PIO_Output_Latch_State & 0xf0) >> 4;
+			// PWM-Mode, !OC1B set on compare match, Cleared when TCNT1 = 0
+			GTCCR = (1<<PWM1B) | (1<<COM1B0);
+#else
+				;
+#endif
+		}
+	}
+}
+
+void latch_out(uint8_t bb)
+{
+	uint8_t p = 0, id;
 
 	/* 
 	uint8_t i, mask = 1;
@@ -286,6 +347,7 @@ void pin_set(uint8_t bb)
 	for (i = 0; i < sizeof(pio_map) / sizeof(pio_map[0]); i++) {
 		if (bb == mask) {
 			p = pio_map[i];
+			id = i;
 			break;
 		}
 		mask = mask << 1;
@@ -295,34 +357,42 @@ void pin_set(uint8_t bb)
 	{
 		case 0x1:
 			p = PIN_PIO0;
+			id = 0;
 			break;
 		case 0x2:
 			p = PIN_PIO1;
+			id = 1;
 			break;
 		case 0x4:
 			p = PIN_PIO2;
+			id = 2;
 			break;
 		case 0x8:
 			p = PIN_PIO3;
+			id = 3;
 			break;
 #ifdef PIN_PIO4
 		case 0x10:
 			p = PIN_PIO4;
+			id = 4;
 			break;
 #endif
 #ifdef PIN_PIO5
 		case 0x20:
 			p = PIN_PIO5;
+			id = 5;
 			break;
 #endif
 #ifdef PIN_PIO6
 		case 0x40:
 			p = PIN_PIO6;
+			id = 6;
 			break;
 #endif
 #ifdef PIN_PIO7
 		case 0x80:
 			p = PIN_PIO7;
+			id = 7;
 			break;
 #endif
 		default:
@@ -334,28 +404,8 @@ void pin_set(uint8_t bb)
 		(pack.PIO_Output_Latch_State & bb)) {
 		/* pin change by write */
 		printf ("set %02X to %d\n", bb, pack.PIO_Output_Latch_State & bb);
-		if (pack.PIO_Output_Latch_State & bb) {
-			/* According to spec:
-			 * set 1 / non-conducting (off)
-			 * set to input
-			 */
-			PIN_DDR &= ~(p);
-#ifdef ACTIVE_LOW
-			/* enable pull up */
-			PORT_REG |= (p);
-#else
-			/* no pull up */
-			PORT_REG &= ~p;
-#endif /* ACTIVE_LOW */
-			PCMSK |= p;
-		} else {
-			/* set 0 / 0 = conducting (on) */
-			PCMSK &= ~(p);
-			/* set output and low on 0 */
-			PIN_DDR |= p;
-			PORT_REG &= ~p;
-		}
-		pin_change(PIN_REG, p, bb);
+		pin_set(p, id, bb);
+		latch_state(PIN_REG, p, bb);
 	}
 #if defined(GIFR) && defined(PCIF0)
 	GIFR = _BV(PCIF0);
@@ -382,7 +432,7 @@ static void owResetSignal(void)
 	wdr();
 	cli();
 	sbi (OW_DDR, OW_PINN);
-	_delay_us (960);
+	_delay_us (1060);
 	cbi (OW_DDR, OW_PINN);
 	_ms++;
 	/* wait for presence detect pulse from other clients, but after
@@ -416,7 +466,6 @@ void var_init(void)
 
 	alarmflag = 0;
 	btn_active = 0;
-	sync_pins();
 	for (i = 0;i < MAX_BTN;i++)
 		initBtn(1, &btn[i]);
 	pack.PIO_Activity_Latch_State = 0;
@@ -429,6 +478,7 @@ void var_init(void)
 
 void reg_init(void)
 {
+	uint8_t p = 4;
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__) || defined(ATMEGA)
@@ -437,10 +487,26 @@ void reg_init(void)
 #endif
 #if defined(__AVR_ATtiny85__)
 	/* PIN_DDR |= PIN_PIO0 | PIN_PIO1; */
-	PCMSK = (_BV(PCINT0) | _BV(PCINT1) /* | _BV(PCINT3) | _BV(PCINT4)*/);
+	PCMSK = (_BV(PCINT0) | _BV(PCINT1) /* | _BV(PCINT3) */);
 #endif
 #if defined(PCICR) && defined(PCIE0)
 	PCICR = _BV(PCIE0);
+#endif
+	sync_pins();
+	if ((config_info[CFG_POL_ID] & _BV(p)) == 0) {
+		/* initially active low */
+		PIN_DDR |= _BV(p);
+		PORT_REG &= ~_BV(p);
+		/* PIO_Logic_State (inverted) is high cause it
+		   represents transistor output */
+	} else
+		PCMSK |= (_BV(p));
+#if defined(__AVR_ATtiny85__)
+		/* PWM */
+		TCNT1 = 0xf;
+		// timer on, timer cleared on compare match with OCR1C, prescaler 1/128 => F_TIMER = 31kHz
+		TCCR1 = (1<<CTC1) | (1<<CS13);
+		OCR1C = 0xf;
 #endif
 }
 
@@ -472,15 +538,26 @@ void cfg_init(void)
 #ifndef AVRSIM
 	eeprom_read_block((void*)&config_info, (const void*)7, CFG_VERS_ID);
 #endif
-	config_info[CFG_VERS_ID] = VERSION;
+	config_info[CFG_VERS_ID] = MAJ_VERSION;
+	config_info[CFG_VERS_ID + 1] = MIN_VERSION;
+#if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
+	config_info[CFG_TYPE_ID] = 4;
+#endif
+#if defined(__AVR_ATtiny85__)
+	config_info[CFG_TYPE_ID] = 2;
+#endif
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+	if (config_info[CFG_TYPE_ID] == 0xff)
+		/* default new version */
+		config_info[CFG_TYPE_ID] = 1;
+#endif
 }
 
 void setup()
 {
 #ifdef WDT_ENABLED
 	uint8_t mcusr_old;
-#endif
-#ifdef WDT_ENABLED
+
 	/* the watchdog timer remains active even after a system reset (except a
 	 * power-on condition), using the fastest prescaler value.
 	 * It is therefore required to turn off the watchdog early
@@ -502,13 +579,8 @@ void setup()
 	serial_init();
 #endif
 	cfg_init();
-	reg_init();
 	var_init();
-#ifdef WDT_ENABLED
-	/* Enable WDT Interrupt*/
-	//WDTCSR |= _BV(WDIE);
-	//wdt_enable(WDTO_4S);
-#endif
+	reg_init();
 	sei();
 	_delay_ms(100);
 #ifdef WITH_LEDS
@@ -537,9 +609,8 @@ void ow_loop()
 		/* write, data in PIO_Output_Latch_State */
 		uint8_t i;
 		printf ("LogicState=%02X OutLatch=%02X\n", pack.PIO_Logic_State, pack.PIO_Output_Latch_State);
-		for (i = 1; i < 0x80; i = i * 2) {
-			pin_set(i);
-		}
+		for (i = 1; i < 0x80; i = i * 2)
+			latch_out(i);
 		// avoid signal generation
 		int_signal = SIG_NO;
 		gcontrol &= ~0x01;
@@ -645,7 +716,7 @@ void btn_loop()
 					pack.PIO_Output_Latch_State &= ~out;
 				else
 					pack.PIO_Output_Latch_State |= out;
-				pin_set(out);
+				latch_out(out);
 				// signal not the input, but only the out change
 			} else
 				act_latch(1, mask);
@@ -662,7 +733,7 @@ void btn_loop()
 			/* long pressed done for push buttons or
 			    toggled the switch */
 			pack.FF1 = p->press / 8;
-		act_latch(1, mask);
+			act_latch(1, mask);
 			printf ("#%i release\n", i);
 			break;
 		case BTN_PRESS_LOW:
@@ -775,6 +846,26 @@ int main(void)
 #endif
 {
 	setup();
+#if 0
+			/* PWM */
+			TCNT1 = 50;
+			GTCCR = (1<<PWM1B) | (1<<COM1B0);        // PWM-Mode, !OC1B set on compare match, Cleared when TCNT1 = 0
+			TCCR1 = (1<<CTC1) | (1<<CS12) | (1<<CS11);    // timer on, timer cleared on compare match with OCR1C, prescaler 1/32 => F_TIMER = 125kHz
+			OCR1C = 50;  // F_PWM = 625Hz
+			OCR1B = 1;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
+	delay(1000);	
+			OCR1B = 3;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
+	delay(1000);	
+			OCR1B = 6;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
+	delay(1000);	
+			OCR1B = 14;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
+	delay(1000);	
+			OCR1B = 25;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
+	delay(1000);	
+			OCR1B = 45;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
+	delay(1000);	
+			GTCCR &= ~((1<<PWM1B) | (1<<COM1B0));
+#endif
 	while (1) {
 		loop();
 	}

@@ -25,7 +25,7 @@ extern void setup();
 extern void loop();
 extern uint8_t config_info[26];
 extern volatile pack_t pack;
-extern void pin_set(uint8_t bb);
+extern void latch_out(uint8_t bb);
 extern volatile uint8_t int_signal;
 extern volatile uint8_t btn_active;
 
@@ -231,21 +231,45 @@ int btnTest()
 
 int test_pinset()
 {
+	config_info[CFG_POL_ID] = 0xfe; // PIO0 reversed pol
+	config_info[CFG_CFG_ID] = 0x1; // PIO0 PWM
+	setup();
+	if ((PIN_DDR & 0x1) != 0x1)
+		return -1;
+	if ((PORT_REG & 0x1) != 0)
+		return -1;
+	if ((pack.PIO_Logic_State & 0x1) != 0x1)
+		// must be inactive
+		return -1;
 	// result in setting  output
-	pack.PIO_Output_Latch_State &= ~0x2;
+	pack.PIO_Output_Latch_State &= ~0x1;
 	// activate port
-	pin_set(2);
-	if ((PIN_DDR & 0x2) != 0x2)
+	latch_out(1);
+	if ((PORT_REG & 0x1) != 0x1)
 		return -1;
-	if ((PORT_REG & 0x2) != 0x0)
+	if ((pack.PIO_Logic_State & 0x1) != 0)
+		// must be active
 		return -1;
+
+	pack.PIO_Output_Latch_State |= 0x1;
+	// activate port
+	latch_out(1);
+	if ((PORT_REG & 0x1) != 0)
+		return -1;
+	if ((pack.PIO_Logic_State & 0x1) != 0x1)
+		// must be inactive
+		return -1;
+
 	pack.PIO_Output_Latch_State = 0xff;
+	config_info[CFG_POL_ID] = 0xff; // normal pol
+	config_info[CFG_CFG_ID] = 0xff;
 	// pin 2 clear / input
-	pin_set(2);
+	latch_out(2);
 	if (PIN_DDR != 0)
 		return -1;
 	if ((PORT_REG & 0x02) != 0x02)
 		return -1;
+	return 0;
 }
 
 // Press button on PIN_PIO0 (1<<PINB0)
@@ -261,8 +285,15 @@ void btnPress()
 
 int switchTest()
 {
-	PORTB = 0;	
+	/* set up needs it */
+	config_info[CFG_POL_ID] = 0xff;
+	config_info[CFG_CFG_ID] = 0xff;
+	config_info[CFG_BTN_ID] = 0x0;
+	config_info[4] = 0xff;
 	config_info[CFG_SW_ID] = 0x2; // 2 = PIO1 (1<<PINB1)
+	setup();
+
+	PORTB = 0;
 	// Button on PIN_PIO0 (1<<PINB0)
 	btnPress();
 	// check for active output PIO1 (1<<PINB1)
@@ -270,9 +301,9 @@ int switchTest()
 		return -1;
 	if ((PORT_REG & 0x2) != 0x0)
 		return -1;
-	if (pack.PIO_Logic_State & 0x2 == 0)
+	if ((pack.PIO_Logic_State & 0x2) != 0)
 		return -1;
-	if (pack.PIO_Activity_Latch_State & 0x2 != 0x2)
+	if ((pack.PIO_Activity_Latch_State & 0x2) != 0x2)
 		return -1;
 	if (btn_active != 0)
 		return -1;
@@ -286,9 +317,9 @@ int switchTest()
 	// check for non active output PIO1 (1<<PINB1)
 	if ((PIN_DDR & 0x2) != 0)
 		return -1;
-	if (pack.PIO_Logic_State & 0x2 == 2)
+	if ((pack.PIO_Logic_State & 0x2) == 2)
 		return -1;
-	if (pack.PIO_Activity_Latch_State & 0x2 != 0x2)
+	if ((pack.PIO_Activity_Latch_State & 0x2) != 0x2)
 		return -1;
 	if (btn_active != 0)
 		return -1;
@@ -301,13 +332,7 @@ int switchTest()
 int main()
 {
 	PINB = 0xff;
-	setup();
-	//btnTest();
-	/*| btn | pin | pol | sw1 | sw2 | sw3 | sw4 | sw5 | sw6 | sw7 | sw8 | */
-	config_info[CFG_BTN_ID] = 0x0;
-	config_info[CFG_SW_ID] = 0x2;
-	config_info[4] = 0xff;
-	//btnTest();
+	//test_pinset();
 	switchTest();
 
 	return 0;
