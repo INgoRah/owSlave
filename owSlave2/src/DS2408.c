@@ -223,11 +223,12 @@ static inline void latch_state(uint8_t pins, uint8_t p, uint8_t mask)
 	pack.PIO_Activity_Latch_State |= mask;
 }
 
+/* Function is / must be protected by interrupts */
 static void sync_pins()
 {
 	uint8_t pins;
-	pins = PIN_REG;
 
+	pins = PIN_REG;
 	pin_sync_ls(pins, PIN_PIO0, 0x1);
 	pin_sync_ls(pins, PIN_PIO1, 0x2);
 	pin_sync_ls(pins, PIN_PIO2, 0x4);
@@ -405,6 +406,7 @@ void latch_out(uint8_t bb)
 		/* pin change by write */
 		printf ("set %02X to %d\n", bb, pack.PIO_Output_Latch_State & bb);
 		pin_set(p, id, bb);
+		sync_pins();
 		latch_state(PIN_REG, p, bb);
 	}
 #if defined(GIFR) && defined(PCIF0)
@@ -413,8 +415,6 @@ void latch_out(uint8_t bb)
 #if defined(GIFR) && defined(PCIF)
 	GIFR = _BV(PCIF);
 #endif
-	//pin_state = PIN_REG & (~PIN_DDR);
-	sync_pins();
 	sei();
 }
 
@@ -478,7 +478,9 @@ void var_init(void)
 
 void reg_init(void)
 {
-	uint8_t p = 4;
+	uint8_t p;
+
+	if (config_info[CFG_CFG_FEAT] & FEAT_TEMP == 0) {
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__) || defined(ATMEGA)
@@ -492,22 +494,36 @@ void reg_init(void)
 #if defined(PCICR) && defined(PCIE0)
 	PCICR = _BV(PCIE0);
 #endif
-	sync_pins();
-	if ((config_info[CFG_POL_ID] & _BV(p)) == 0) {
-		/* initially active low */
-		PIN_DDR |= _BV(p);
-		PORT_REG &= ~_BV(p);
-		/* PIO_Logic_State (inverted) is high cause it
-		   represents transistor output */
-	} else
-		PCMSK |= (_BV(p));
+	for (int i = 0; i < MAX_BTN; i++) {
+		p = pio_map[i];
+		/* check config */
+		if (config_info[CFG_CFG_ID + i] != CFG_DEFAULT)
+			/* no pull up */
+			PORT_REG &= ~(p);
+		if ((config_info[CFG_POL_ID] & p) == 0) {
+			PORT_REG &= ~(p);
+			if (config_info[CFG_PIN_ID] & p) {
+				/* output initially active low */
+				PIN_DDR |= (p);
+				PCMSK &= ~(p);
+				/* PIO_Logic_State (inverted) is high cause it
+				represents transistor output */
+			}
+		}
+	}
 #if defined(__AVR_ATtiny85__)
-		/* PWM */
-		TCNT1 = 0xf;
-		// timer on, timer cleared on compare match with OCR1C, prescaler 1/128 => F_TIMER = 31kHz
-		TCCR1 = (1<<CTC1) | (1<<CS13);
-		OCR1C = 0xf;
+	if (config_info[CFG_CFG_ID] == CFG_ACT_PWM) {
+		/* PWM on PB4 */
+		PCMSK &= ~(_BV(PB4));
 #endif
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+	if (config_info[CFG_CFG_ID + 5] == CFG_ACT_PWM) {
+		PIN_DDR |= _BV(PA5);
+		PCMSK &= ~(0x20);
+#endif
+		TCNT1 = 0xf;
+	}
+	sync_pins();
 }
 
 void cfg_init(void)
@@ -582,7 +598,9 @@ void setup()
 	var_init();
 	reg_init();
 	sei();
+#ifndef AVRSIM
 	_delay_ms(100);
+#endif
 #ifdef WITH_LEDS
 	led_flash();
 #endif
@@ -608,11 +626,41 @@ void ow_loop()
 	if (gcontrol & 1) {
 		/* write, data in PIO_Output_Latch_State */
 		uint8_t i;
-		printf ("LogicState=%02X OutLatch=%02X\n", pack.PIO_Logic_State, pack.PIO_Output_Latch_State);
-		for (i = 1; i < 0x80; i = i * 2)
-			latch_out(i);
-		// avoid signal generation
-		int_signal = SIG_NO;
+
+			printf ("LogicState=%02X OutLatch=%02X\n", pack.PIO_Logic_State, pack.PIO_Output_Latch_State);
+#if defined(__AVR_ATtiny85__)
+			if (config_info[CFG_CFG_ID] == CFG_ACT_PWM) {
+				if (pack.PIO_Output_Latch_State > 0) {
+					TCCR1 = (1<<CTC1) | (1<<CS13);
+					OCR1C = 0xf;
+					GTCCR = (1<<PWM1B) | (1<<COM1B0);
+					OCR1B = (pack.PIO_Output_Latch_State & 0xf0) >> 4;
+				}
+				else {
+					TCCR1 = 0;
+					GTCCR = 0;
+				}
+			} else {
+#endif
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+			if (config_info[CFG_CFG_ID + 5] == CFG_ACT_PWM) {
+				if (pack.PIO_Output_Latch_State > 0) {
+					/* PWM on PA5 / PIO5 */
+					TCCR1A = _BV(COM1B1) /*| _BV(COM1B0)*/ | _BV(WGM00);
+					TCCR1B = /*_BV(WGM13) | _BV(WGM12) | */ _BV(CS12);
+					OCR1B = pack.PIO_Output_Latch_State;
+				} else {
+					TCCR1A = 0;
+					TCCR1B = 0;
+				}
+			} else {
+#endif
+				for (i = 1; i < 0x80; i = i * 2)
+					latch_out(i);
+			}
+			// avoid signal generation
+			int_signal = SIG_NO;
+		}
 		gcontrol &= ~0x01;
 	}
 	if (gcontrol & 2) {
@@ -671,10 +719,86 @@ void statusPrint()
 #endif
 }
 
-void btn_loop()
+uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
+{
+	uint8_t act_btns = 0, out;
+
+	switch (st) {
+	case BTN_PRESSED_LONG:
+		/* active low but for longer time */
+		pack.FF1 = p->press / 8;
+		// get the next edge
+		act_btns |= mask;
+		statusPrint();
+		break;
+	case BTN_PRESSED:
+		/* short pressed and done */
+		wdr();
+		pack.FF1 = p->press / 8;
+		out = config_info[CFG_SW_ID + i];
+		if (out != 0xff) {
+			printf ("auto sw %d -> %d (%02X)\n", i, out, pack.PIO_Output_Latch_State);
+			// toggle output
+			if (pack.PIO_Output_Latch_State & out)
+				pack.PIO_Output_Latch_State &= ~out;
+			else
+				pack.PIO_Output_Latch_State |= out;
+			latch_out(out);
+			// signal not the input, but only the out change
+		} else
+			act_latch(1, mask);
+		printf ("#%i press\n", i);
+#ifdef DEBUG
+		if (p->cnt > 10) {
+			p->cnt = 0;
+			statusPrint();
+		}
+#endif
+		break;
+	case BTN_RELEASED:
+		wdr();
+		/* long pressed done for push buttons or
+			toggled the switch */
+		pack.FF1 = p->press / 8;
+		act_latch(1, mask);
+		printf ("#%i release\n", i);
+		break;
+	case BTN_PRESS_LOW:
+		/* intermediate end state, wait for release
+			* for push buttons.
+			* Switch should go to sleep
+			**/
+		act_btns |= mask;
+		if (config_info[CFG_BTN_ID] & mask) {
+			wdr();
+			act_latch(0, mask);
+		}
+		break;
+	case BTN_LOW:
+		/* waiting for release for push buttons. 
+			In case of non push button we are done here */
+		if (!(config_info[CFG_BTN_ID] & mask))
+			act_btns |= mask;
+		break;
+	/* Internal and intermediate state are ongoing evaluations
+		* BTN_PRESS_LOW BTN_INVALID BTN_UNSTABLE BTN_TIMER_HIGH BTN_TIMER_LOW
+		*/
+	case BTN_HIGH:
+		/* means no change */
+		// TODO: break here?? we are done!
+		break;
+	default:
+		act_btns |= mask;
+		break;
+	}
+
+	return act_btns;
+}
+
+void pin_change_loop()
 {
 	int i;
-	uint8_t pins, in, act_btns, mask = 1, out;
+	uint8_t pins, in, act_btns, mask = 1;
 #ifdef DEBUG
 	static int stPrints = 50;
 #endif
@@ -686,83 +810,44 @@ void btn_loop()
 	 * overridden by int */
 	btn_active = 0;
 	for (i = 0; i < MAX_BTN; i++) {
-		int st;
-		struct pinState *p;
 
-		if (PIN_DDR & pio_map[i]) {
+		/* ignore outputs */
+		if ((config_info[CFG_PIN_ID] & pio_map[i]) != 0) {
 			mask = mask << 1;
 			continue;
 		}
-		p = &btn[i];
 		in = !!(pins & pio_map[i]);
-		st = checkBtn(in, p);
-		switch (st) {
-		case BTN_PRESSED_LONG:
-			/* active low but for longer time */
-			pack.FF1 = p->press / 8;
-			// get the next edge
-			act_btns |= mask;
-			statusPrint();
-			break;
-		case BTN_PRESSED:
-			/* short pressed and done */
-			wdr();
-			pack.FF1 = p->press / 8;
-			out = config_info[CFG_SW_ID + i];
-			if (out != 0xff) {
-				printf ("auto sw %d -> %d (%02X)\n", i, out, pack.PIO_Output_Latch_State);
-				// toggle output
-				if (pack.PIO_Output_Latch_State & out)
-					pack.PIO_Output_Latch_State &= ~out;
-				else
-					pack.PIO_Output_Latch_State |= out;
-				latch_out(out);
-				// signal not the input, but only the out change
-			} else
-				act_latch(1, mask);
-			printf ("#%i press\n", i);
-#ifdef DEBUG
-			if (p->cnt > 10) {
-				p->cnt = 0;
-				statusPrint();
+		/* check config */
+		if ((config_info[CFG_BTN_ID] & pio_map[i]) == 0) {
+			/* push button handling */
+			int st;
+			struct pinState *p = &btn[i];
+			
+			st = checkBtn(in, p);
+			act_btns |= btn_loop(st, mask, i, p);
+		} else {
+			/* pin change handling without validation */
+			switch (config_info[CFG_CFG_ID + i]) {
+				case CFG_ACT_HIGH:
+					/* alarm only on rising edge */
+					if (in == 1) {
+						if ((pack.PIO_Logic_State & mask) == 0)
+							act_latch(1, mask);
+					}
+					else
+						pack.PIO_Logic_State &= ~mask;
+					break;
+				case CFG_ACT_LOW:
+					/* alarm only on falling edge */
+					if (in == 0)
+						act_latch(0, mask);
+					else
+						pack.PIO_Logic_State |= mask;
+					break;
+				default:
+					act_latch(in, mask);
+					break;
 			}
-#endif
-			break;
-		case BTN_RELEASED:
-			wdr();
-			/* long pressed done for push buttons or
-			    toggled the switch */
-			pack.FF1 = p->press / 8;
-			act_latch(1, mask);
-			printf ("#%i release\n", i);
-			break;
-		case BTN_PRESS_LOW:
-			/* intermediate end state, wait for release
-			 * for push buttons.
-			 * Switch should go to sleep
-			 **/
-			act_btns |= mask;
-			if (config_info[CFG_BTN_ID] & mask) {
-				wdr();
-				act_latch(0, mask);
-			}
-			break;
-		case BTN_LOW:
-			/* waiting for release for push buttons. 
-			   In case of non push button we are done here */
-			if (!(config_info[CFG_BTN_ID] & mask))
-				act_btns |= mask;
-			break;
-		/* Internal and intermediate state are ongoing evaluations
-		 * BTN_PRESS_LOW BTN_INVALID BTN_UNSTABLE BTN_TIMER_HIGH BTN_TIMER_LOW
-		 */
-		case BTN_HIGH:
-			/* means no change */
-			// TODO: break here?? we are done!
-			break;
-		default:
-			act_btns |= mask;
-			break;
 		}
 		mask = mask << 1;
 	}
@@ -781,6 +866,10 @@ void btn_loop()
 #endif
 }
 
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+#define TCCR1 TCCR1B
+#endif
+
 void loop()
 {
 	ow_loop();
@@ -789,12 +878,14 @@ void loop()
 	if (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0))
 		return;
 	if (btn_active)
-		btn_loop();
+		pin_change_loop();
 	if (int_signal == SIG_ACT)
 		owResetSignal();
 	cli();
-	if (btn_active || int_signal == SIG_ACT) {
+	if (btn_active || int_signal == SIG_ACT || TCCR1 != 0) {
 		sei();
+		if (TCCR1 != 0)
+			wdr();
 #ifndef AVRSIM
 		_delay_ms(1);
 #endif
@@ -820,7 +911,6 @@ void loop()
 #endif
 		LED_ON();
 	}
-	//sync_pins();
 #if 0
 	int i;
 	values[6] = btn_active;
@@ -846,27 +936,10 @@ int main(void)
 #endif
 {
 	setup();
-#if 0
-			/* PWM */
-			TCNT1 = 50;
-			GTCCR = (1<<PWM1B) | (1<<COM1B0);        // PWM-Mode, !OC1B set on compare match, Cleared when TCNT1 = 0
-			TCCR1 = (1<<CTC1) | (1<<CS12) | (1<<CS11);    // timer on, timer cleared on compare match with OCR1C, prescaler 1/32 => F_TIMER = 125kHz
-			OCR1C = 50;  // F_PWM = 625Hz
-			OCR1B = 1;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
-	delay(1000);	
-			OCR1B = 3;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
-	delay(1000);	
-			OCR1B = 6;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
-	delay(1000);	
-			OCR1B = 14;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
-	delay(1000);	
-			OCR1B = 25;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
-	delay(1000);	
-			OCR1B = 45;   // PWM 50% duty cycle on startup | Inversion of PWM signal by driver
-	delay(1000);	
-			GTCCR &= ~((1<<PWM1B) | (1<<COM1B0));
-#endif
+
 	while (1) {
 		loop();
 	}
+
+	return 0;
 }

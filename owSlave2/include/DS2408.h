@@ -21,8 +21,8 @@
 #define OW_DDR DDRD  //pin direction register
 
 #define PORT_REG PORTB
-#ifdef TST_AVRSIM
-#define PIN_REG PORTB
+#ifdef AVRSIM
+#define PIN_REG PORTC
 #else
 #define PIN_REG PINB
 #endif
@@ -123,9 +123,13 @@
  * A state change (alarm) is signaled on low and high. 
  */
 #define CFG_BTN_ID 0
-#define CFG_PIN_ID 1
-/**  A 1 represents normal polarity (open collector).
+/**  A 1 represents an output pin otherwise input
  *   (based on real port pin mask).
+ **/
+#define CFG_PIN_ID 1
+/** Used for output via transistor.
+ * A 1 represents normal polarity (open collector). Based on real port
+ * pin mask.
  * Set 0 = conducting, on, pin active low 
  * set 1 / non-conducting (off), input
  * A 0 means reversed polarity for transistor output:
@@ -133,6 +137,9 @@
  * Set 1 = off, inactive, pin is in high resistive not
  *         driving high, no pullup
  * Logic state represents the transistor output, not pin output
+ * For input: a 1 represents normal polarity (push button to ground) with
+ *   pull-up resistor. High is inactive, low pushed
+ *   A 0 means high active, low inactive. No pull-up enabled.
  */
 #define CFG_POL_ID 2
 /** Auto switch config for each PIO
@@ -140,11 +147,20 @@
  * */
 #define CFG_SW_ID 3  /* .. 10 */
 /** PIO configuration
- *  1 = PWM
+ *  1 = PWM output
+ *  2 = Touch input with short high output. Reacts only on rising edge
+ *  3 = Touch input with short high output. Reacts only on rising edge
  *  0xff = default
  * */
 #define CFG_CFG_ID 11 /* .. 18 */
-/* 19 */
+#define CFG_DEFAULT 0xff
+#define CFG_ACT_PWM 1
+#define CFG_ACT_HIGH 2 /** signal is active high, no pull up */
+#define CFG_ACT_LOW 3
+
+#define CFG_CFG_FEAT 19
+#define FEAT_TEMP 0x01
+
 /* 20 */
 #define CFG_VERS_ID 21
 /** Type: 0 - ATiny84 v1

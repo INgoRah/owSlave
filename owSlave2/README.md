@@ -14,10 +14,13 @@ Fork from https://git.smho.de/gw/?p=owSlave2.git;a=summary
   are used for the duty cycle (bightnes)
 
 ## To Do
+[ ] optimize touch sensor handling (active high, no bouncing, just rising edge with validation).
+    POL and SW_ID to be implemented
+[ ] PWM output level to be applied on change request (not onyl on switching it on)
 [ ] store new config / custom command or newid command feature
 [ ] regression testing signal generation and improvements (bus detection and delay)
 [ ] Disarm interrupt on reset pulse and arm again afterwards.
     Needs check wether slave can cope with just a reset without ROM commands.
     Timeout after reset?
 [ ] iButton type 2 interrupt (assert reset for long time).
-    Needs master improvements detecting it and slave ASM code extending the reset low time    
+    Needs master improvements detecting it and slave ASM code extending the reset low time

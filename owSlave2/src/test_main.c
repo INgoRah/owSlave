@@ -206,15 +206,19 @@ int btnTest()
 {
 	int ret;
 
+	PIN_REG = 0xfF;
+	PORT_REG = 0;
+	setup();
+
 	for (ttimer = 0; ttimer < (sizeof(btnState) / sizeof(struct tvector)); ttimer++) {
 		struct tvector* p = &btnState[ttimer];
 
 		if (p->signal)
 			btn_active = 1;
 		if (p->btn)
-			PINB |= 1;
+			PIN_REG |= 1;
 		else
-			PINB &= ~1;
+			PIN_REG &= ~1;
 		sigdone = 0;
 		loop();
 		while (_ms < p->ms && btn_active)
@@ -232,7 +236,11 @@ int btnTest()
 int test_pinset()
 {
 	config_info[CFG_POL_ID] = 0xfe; // PIO0 reversed pol
-	config_info[CFG_CFG_ID] = 0x1; // PIO0 PWM
+	config_info[CFG_PIN_ID] = 0x01;
+	config_info[CFG_CFG_ID] = CFG_DEFAULT;
+	config_info[CFG_CFG_ID + 1] = CFG_DEFAULT;
+	PIN_REG = 0xfF;
+	PORT_REG = 0;
 	setup();
 	if ((PIN_DDR & 0x1) != 0x1)
 		return -1;
@@ -283,17 +291,107 @@ void btnPress()
 	loop();
 }
 
+void pinSignal()
+{
+	struct tvector pinState[] = {
+		/* ms, pin, signal, remark, id */
+		{ 0, 0, 0,"#0 unstable", 0 },
+		{ 2, 0, 0 ,"", 0 },
+		{ 5, 1, 1, "#1 pin active", 1 },
+		{ 20, 0, 1, "#2 inactive", 2 },
+		{ 40, 0, 0, "", 3 },
+	};
+
+	for (ttimer = 0; ttimer < (sizeof(pinState) / sizeof(struct tvector)); ttimer++) {
+		struct tvector* p = &pinState[ttimer];
+
+		if (p->signal) {
+			btn_active = 1;
+			if (p->btn) {
+				PIN_REG |= 1;
+			}
+			else {
+				PIN_REG = 0xFE;
+				PORTC = 0xFE;
+			}
+		}
+		sigdone = 0;
+		loop();
+		while (_ms < p->ms && btn_active)
+			loop();
+		if (p->id) {
+			g_testId++;
+			switch (g_testId) {
+				case 1:
+					if ((pack.PIO_Logic_State & 0x1) != 1)
+						return -1;
+					if ((pack.PIO_Activity_Latch_State & 0x1) != 0x01)
+						return -1;
+					if ((alarmflag) != 1)
+						return -1;
+					pack.PIO_Activity_Latch_State &= ~0x1;
+					alarmflag = 0;
+					break;
+				case 2:
+					if ((pack.PIO_Logic_State & 0x1) != 0)
+						return -1;
+					if ((pack.PIO_Activity_Latch_State & 0x1) == 0x01)
+						return -1;
+					if ((alarmflag) != 0)
+						return -1;
+				break;
+			}
+			//ret = testCheck(g_testId);
+			/*if (ret != 0)
+				return -1;*/
+		}
+	}
+}
+
+int pinChgTest()
+{
+	/* set up needs it */
+	config_info[CFG_POL_ID] = 0xfe;
+	config_info[CFG_PIN_ID] = 0x00;
+	config_info[CFG_BTN_ID] = 0x01;
+	config_info[4] = 0xff;
+	config_info[CFG_CFG_ID] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 1] = CFG_DEFAULT;
+	/* assume the pin is inactive = low because inverted pol */
+	PIN_REG = 0xfe;
+	PORT_REG = 0x0;
+	setup();
+	// must be low:
+	if ((PORT_REG & 0x1) != 0x0)
+		return -1;
+	if ((DDRB & 0x1) != 0x0)
+		return -1;
+	/*if ((pack.PIO_Logic_State & 0x1) != 0)
+		return -1;
+	*/
+	pack.PIO_Logic_State &= ~(1);
+	pinSignal();
+	pack.PIO_Output_Latch_State &= ~0x2;
+	// activate port
+	latch_out(2);
+	loop();
+	pinSignal();
+	return 0;
+}
+
 int switchTest()
 {
 	/* set up needs it */
 	config_info[CFG_POL_ID] = 0xff;
 	config_info[CFG_CFG_ID] = 0xff;
+
 	config_info[CFG_BTN_ID] = 0x0;
 	config_info[4] = 0xff;
 	config_info[CFG_SW_ID] = 0x2; // 2 = PIO1 (1<<PINB1)
 	setup();
 
-	PORTB = 0;
+	PIN_REG = 0xfF;
+	PORT_REG = 0;
 	// Button on PIN_PIO0 (1<<PINB0)
 	btnPress();
 	// check for active output PIO1 (1<<PINB1)
@@ -331,11 +429,12 @@ int switchTest()
 
 int main()
 {
-	PINB = 0xff;
-	//test_pinset();
-	switchTest();
+	int ret;
+	//pinChgTest();
+	ret = test_pinset();
+	//switchTest();
 
-	return 0;
+	return ret;
 }
 #endif
 
