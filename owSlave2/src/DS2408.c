@@ -98,31 +98,10 @@ volatile pack_t pack;
 /*
  * config from EEPROM
  * | btn | pin | pol | sw0 |  sw1 |  sw2 | sw3 | sw4 | sw5 | sw6 | sw7 |
- *   cfg0 | cfg1 | cfg2 | cfg3 |cfg4 | cfg5| cfg6 | cfg7 | x |
+ *   cfg0 | cfg1 | cfg2 | cfg3 |cfg4 | cfg5| cfg6 | cfg7 | feature | x |
  *   maj_vers | min_vers | type
- * btn: 0 means a push button (based on real port pin mask)
- *      1 represents a simple input with bouncing, no press button
- * pin: a 1 represents input (with change detection), 0: output
- *      (based on real port pin mask)
- * pol: a 1 represents normal polarity (set 0 = conducting, on)
- *      (based on real port pin mask)
- * sw*: auto switch the specified ouput (0xff no switching)
- *      * - pio number (starting from 0)
- *          value: PIO bit number (starting from 1)) corresponding
- * 					to PIO_Output_Latch_State
- *      No latch will be set on input, but only on output switch
- * cfg*: special function (0xff: no)
-		1: PWM
- *      * - pio number (starting from 0)
- * maj_vers: Major Version
- * min_vers: Minor Version
- * type: 0 - ATiny84 v1
- *  	 1 - ATiny84 v2
- *  	 2 - ATiny85 v1
- *  	 3 - ATiny84 custom
- *  	 4 - ATMega v1
  */
-uint8_t config_info[26] = {0x0};
+uint8_t config_info[26];
 uint8_t signal_cfg;
 unsigned long _ms;
 
@@ -188,6 +167,12 @@ void delay(unsigned long ms)
 	}
 }
 
+static int getADC()
+{
+  while((ADCSRA & _BV(ADSC)));    // Wait until conversion is finished
+  return ADC;
+}
+
 static inline void act_latch(uint8_t p, uint8_t mask)
 {
 	wdr();
@@ -201,9 +186,12 @@ static inline void act_latch(uint8_t p, uint8_t mask)
 
 static inline void pin_sync_ls(uint8_t pins, uint8_t p, uint8_t mask)
 {
+#if 0
+	why was this??
 	if ((config_info[CFG_POL_ID] & p) == 0)
 		/* ignore logic state here cause inverted and set before */
 		return;
+#endif
 	if (pins & p)
 		pack.PIO_Logic_State |= mask;
 	else
@@ -287,6 +275,9 @@ ISR(PCINT0_vect) {
 	GIFR = _BV(PCIF);
 #endif
 }
+
+// when ADC completed, take an interrupt 
+EMPTY_INTERRUPT (ADC_vect);
 
 void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 {
@@ -480,7 +471,8 @@ void reg_init(void)
 {
 	uint8_t p;
 
-	if (config_info[CFG_CFG_FEAT] & FEAT_TEMP == 0) {
+	OWST_INIT_ALL_OFF;
+	OWST_EN_PULLUP
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__) || defined(ATMEGA)
@@ -522,7 +514,12 @@ void reg_init(void)
 		PCMSK &= ~(0x20);
 #endif
 		TCNT1 = 0xf;
+#ifndef ATMEGA
+	} else {
+		/* timer 1 not needed */
+		PRR |= PRTIM1;
 	}
+#endif
 	sync_pins();
 }
 
@@ -552,7 +549,7 @@ void cfg_init(void)
 		eeprom_write_block((const void*)owid, (void*)E2END - 7, 8);
 #endif
 #ifndef AVRSIM
-	eeprom_read_block((void*)&config_info, (const void*)7, CFG_VERS_ID);
+	eeprom_read_block((void*)&config_info, (const void*)7, CFG_TYPE_ID);
 #endif
 	config_info[CFG_VERS_ID] = MAJ_VERSION;
 	config_info[CFG_VERS_ID + 1] = MIN_VERSION;
@@ -589,8 +586,7 @@ void setup()
 	else
 #endif
 		pack.Status = 0x80;
-	OWST_INIT_ALL_OFF;
-	OWST_EN_PULLUP
+
 #ifdef HAVE_UART
 	serial_init();
 #endif
@@ -612,8 +608,43 @@ void setup()
 #endif
 }
 
+void temp_read()
+{
+	uint16_t temp;
+
+	PRR &= ~(1<<PRADC);
+	_delay_us (10);
+	ADCSRB &= ~(1<<ACME);
+	ADMUX = _BV(REFS1) | 0x22; // B00100010
+	/* prescaler of 128 */
+	ADCSRA = (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0) | (1<<ADEN);
+	_delay_us (20);
+
+	/* low noise not working */
+	ADCSRA |=  _BV(ADIF);  // enable ADC, turn off any pending interrupt
+	cli ();
+	set_sleep_mode (SLEEP_MODE_ADC);    // sleep during sample
+	sleep_enable();  
+	// start the conversion
+	ADCSRA |= _BV(ADSC) | _BV(ADIE);
+	sei ();
+	sleep_cpu ();     
+	sleep_disable ();
+	/* awake again, reading should be done, but better make sure
+	   maybe the timer interrupt fired */
+	while (bit_is_set (ADCSRA, ADSC));
+	/* Calculate the temperature in C */
+	temp = getADC() - 275 + (int)config_info[CFG_OFFSET];
+	pack.FF1 = (uint8_t)(temp & 0xff);
+	
+	ADCSRA = 0;
+	PRR |= (1<<PRADC);  /*Switch off adc for save Power */
+	pack.Status |= 0x40;
+}
+
 void ow_loop()
 {
+	static uint8_t out_latch = 0xff;
 	if (reset_indicator) {
 		ap = 0;
 		// stat_to_sample=0;
@@ -627,49 +658,53 @@ void ow_loop()
 		/* write, data in PIO_Output_Latch_State */
 		uint8_t i;
 
-			printf ("LogicState=%02X OutLatch=%02X\n", pack.PIO_Logic_State, pack.PIO_Output_Latch_State);
-#if defined(__AVR_ATtiny85__)
-			if (config_info[CFG_CFG_ID] == CFG_ACT_PWM) {
-				if (pack.PIO_Output_Latch_State > 0) {
-					TCCR1 = (1<<CTC1) | (1<<CS13);
-					OCR1C = 0xf;
-					GTCCR = (1<<PWM1B) | (1<<COM1B0);
-					OCR1B = (pack.PIO_Output_Latch_State & 0xf0) >> 4;
-				}
-				else {
-					TCCR1 = 0;
-					GTCCR = 0;
-				}
-			} else {
-#endif
-#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
-			if (config_info[CFG_CFG_ID + 5] == CFG_ACT_PWM) {
-				if (pack.PIO_Output_Latch_State > 0) {
-					/* PWM on PA5 / PIO5 */
-					TCCR1A = _BV(COM1B1) /*| _BV(COM1B0)*/ | _BV(WGM00);
-					TCCR1B = /*_BV(WGM13) | _BV(WGM12) | */ _BV(CS12);
-					OCR1B = pack.PIO_Output_Latch_State;
-				} else {
-					TCCR1A = 0;
-					TCCR1B = 0;
-				}
-			} else {
-#endif
-				for (i = 1; i < 0x80; i = i * 2)
-					latch_out(i);
-			}
-			// avoid signal generation
-			int_signal = SIG_NO;
+		if (pack.PIO_Output_Latch_State == 0x44 &&
+			(config_info[CFG_CFG_FEAT] & FEAT_TEMP) == 0) {
+			temp_read();
+			pack.PIO_Output_Latch_State = out_latch;
 		}
+		else if (config_info[CFG_CFG_ID] == CFG_ACT_PWM) {
+#if defined(__AVR_ATtiny85__)
+			if (pack.PIO_Output_Latch_State > 0) {
+				TCCR1 = (1<<CTC1) | (1<<CS13);
+				OCR1C = 0xf;
+				GTCCR = (1<<PWM1B) | (1<<COM1B0);
+				OCR1B = (pack.PIO_Output_Latch_State & 0xf0) >> 4;
+			}
+			else {
+				TCCR1 = 0;
+				GTCCR = 0;
+			}
+#endif
+		} else if (config_info[CFG_CFG_ID + 5] == CFG_ACT_PWM) {
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+			if (pack.PIO_Output_Latch_State > 0) {
+				/* PWM on PA5 / PIO5 */
+				TCCR1A = _BV(COM1B1) /*| _BV(COM1B0)*/ | _BV(WGM00);
+				TCCR1B = /*_BV(WGM13) | _BV(WGM12) | */ _BV(CS12);
+				OCR1B = pack.PIO_Output_Latch_State;
+			} else {
+				TCCR1A = 0;
+				TCCR1B = 0;
+			}
+#endif
+		} else {
+			out_latch = pack.PIO_Output_Latch_State;
+			printf ("LogicState=%02X OutLatch=%02X\n", pack.PIO_Logic_State, pack.PIO_Output_Latch_State);
+			for (i = 1; i < 0x80; i = i * 2)
+				latch_out(i);
+		}
+		// avoid signal generation
+		int_signal = SIG_NO;
 		gcontrol &= ~0x01;
 	}
 	if (gcontrol & 2) {
 		/* OW_RESET_ACTIVITY */
 		cli();
 		pack.PIO_Activity_Latch_State = 0;
-		pack.Status &= ~0x80;
+		pack.Status &= 0x3F;
 		pack.FF1 = 0xff;
-		gcontrol &=  ~0x02;
+		gcontrol =  0;
 		alarmflag = 0;
 		int_signal = SIG_ARM;
 		sei();
@@ -691,11 +726,19 @@ void ow_loop()
 		sei();
 	}
 	if (gcontrol & 0x10) {
-		cli();
-		gcontrol &= ~0x10;
 		printf ("%02x %02x %02x %02X %02X %02X\n", config_info[CFG_BTN_ID],
 		config_info[CFG_PIN_ID], config_info[CFG_SW_ID], config_info[CFG_SW_ID + 1],
 		config_info[CFG_SW_ID + 2], config_info[CFG_SW_ID + 3]);
+		cli();
+		gcontrol &= ~0x10;
+		/* store crc and once matches the sent one, store eeprom */
+		if (config_info[CFG_VERS_ID] == 0x55) {
+			config_info[CFG_VERS_ID] = MAJ_VERSION;
+			PIN_DDR |= 0x2;
+			PORT_REG &= ~0x02;
+			// saving...
+			eeprom_write_block((const void*)config_info, (void*)7, CFG_VERS_ID - 1);
+		}
 		sei();
 		statusPrint();
 	}
@@ -719,6 +762,25 @@ void statusPrint()
 #endif
 }
 
+static uint8_t auto_switch(uint8_t i)
+{
+	uint8_t out;
+	out = config_info[CFG_SW_ID + i];
+
+	if (out == 0xff)
+		return 0;
+
+	printf ("auto sw %d -> %d (%02X)\n", i, out, pack.PIO_Output_Latch_State);
+	// toggle output
+	if (pack.PIO_Output_Latch_State & out)
+		pack.PIO_Output_Latch_State &= ~out;
+	else
+		pack.PIO_Output_Latch_State |= out;
+	latch_out(out);
+	// signal not the input, but only the out change
+	return 1;
+}
+
 uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 {
 	uint8_t act_btns = 0, out;
@@ -735,17 +797,7 @@ uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 		/* short pressed and done */
 		wdr();
 		pack.FF1 = p->press / 8;
-		out = config_info[CFG_SW_ID + i];
-		if (out != 0xff) {
-			printf ("auto sw %d -> %d (%02X)\n", i, out, pack.PIO_Output_Latch_State);
-			// toggle output
-			if (pack.PIO_Output_Latch_State & out)
-				pack.PIO_Output_Latch_State &= ~out;
-			else
-				pack.PIO_Output_Latch_State |= out;
-			latch_out(out);
-			// signal not the input, but only the out change
-		} else
+		if (auto_switch(i) == 0)
 			act_latch(1, mask);
 		printf ("#%i press\n", i);
 #ifdef DEBUG
@@ -831,21 +883,24 @@ void pin_change_loop()
 				case CFG_ACT_HIGH:
 					/* alarm only on rising edge */
 					if (in == 1) {
-						if ((pack.PIO_Logic_State & mask) == 0)
-							act_latch(1, mask);
+						if ((pack.PIO_Logic_State & mask) == 0) {
+							if (auto_switch(i) == 0)
+								act_latch(1, mask);
+							pack.PIO_Logic_State |= mask;
+						}
 					}
 					else
 						pack.PIO_Logic_State &= ~mask;
 					break;
 				case CFG_ACT_LOW:
-					/* alarm only on falling edge */
+					/* alarm only on falling edge, not yet verified */
 					if (in == 0)
 						act_latch(0, mask);
 					else
 						pack.PIO_Logic_State |= mask;
 					break;
 				default:
-					act_latch(in, mask);
+					/* not a button and not configured */
 					break;
 			}
 		}
@@ -867,6 +922,9 @@ void pin_change_loop()
 }
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+#define TCCR1 TCCR1B
+#endif
+#if defined(ATMEGA)
 #define TCCR1 TCCR1B
 #endif
 
@@ -911,22 +969,6 @@ void loop()
 #endif
 		LED_ON();
 	}
-#if 0
-	int i;
-	values[6] = btn_active;
-	values[7] = 0xAA;
-	// D9 0 3 CA FE 7 E AA 0 0 1 0 1 55 0 CF 0 
-	//                     #2   #3 
-	for (i = 1; i < MAX_BTN; i++) {
-		struct pinState *p = &btn[i];
-		values[8+ (2*i)] = p->state;
-		values[8+ (2*i) + 1] = p->press / 8;
-		if ((8 + (2*i) + 1) >= CHAN_VALUES)
-			break;
-	}
-	values[CHAN_VALUES-2] = 0x55;
-	values[CHAN_VALUES-1] = crc(values, CHAN_VALUES);
-#endif
 }
 
 #if defined(UNIT_TEST) || defined(AVRSIM)

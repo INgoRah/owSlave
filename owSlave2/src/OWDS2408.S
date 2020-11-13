@@ -211,8 +211,12 @@ h_writesendchanel:
 
 
 hrc_reset_activity:
-	ldi r_temp,2
-	sts gcontrol,r_temp
+	clr r_temp
+	sts alarmflag,r_temp
+	sts pack+2,r_temp 	; pack.PIO_Activity_Latch_State = 0
+	sts pack+5,r_temp	; pack.Status = 0
+	;ldi r_temp,2
+	;sts gcontrol,r_temp
 	ldi r_rwbyte,0xAA
 	ldi r_mode,OW_RESET_ACTIVITY
 	ldi r_sendflag,1 ;jetzt sendet der Slave zum Master

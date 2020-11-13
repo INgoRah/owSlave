@@ -1,4 +1,5 @@
 #if defined(AVRSIM)
+#include <string.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
@@ -20,6 +21,8 @@
 
 #include "DS2408.h"
 
+extern uint8_t gcontrol;
+extern unsigned long _ms;
 extern struct pinState btn[MAX_BTN];
 extern void setup();
 extern void loop();
@@ -163,39 +166,76 @@ struct tvector btnState[] = {
 #endif
 };
 
-static int testCheck(int id)
+uint8_t bitnumber(uint8_t bitmap)
+{
+	int i, res = 1;
+
+	for (i = 0x1; i <= 0x80; i = i << 1) {
+		if (bitmap & i)
+			return res;
+		res++;
+	}
+	/* invalid */
+	return 0xff;
+}
+
+uint8_t bitCount(uint8_t bitmap)
+{
+	int i, res = 0;
+
+	for (i = 0x1; i <= 0x80; i = i << 1) {
+		if (bitmap & i)
+			res++;
+	}
+	/* none */
+	return res;
+}
+
+// Press button on PIN_PIO0 (1<<PINB0)
+void btnPress(const uint8_t pinut)
+{
+	btn[pinut].state = BTN_TIMER_HIGH;
+	btn[pinut].time = BTN_MINH_TIME + _ms + 1;
+	btn[pinut].hl_state = BTN_PRESS_LOW;
+	PIN_REG |= (2 ^ pinut);
+	btn_active = 1;
+	loop();
+}
+
+static int testCheck(int id, const uint8_t pinut)
 {
 	switch (id) {
 	case 1:
 	case 5:
 		// btn press -> latch set?
-		printf("pressing st=%d\n", btn[0].state);
-		if (btn[0].state != BTN_LOW)
+		printf("pressing st=%d\n", btn[pinut].state);
+		if (btn[pinut].state != BTN_LOW)
 			return -1;
 		break;
 	case 2:
 	case 6:
 		// btn press -> latch set?
-		printf("#2 pressed st=%d\n", btn[0].state);
-		if (btn[0].state != BTN_TIMER_HIGH)
+		printf("#2 pressed st=%d\n", btn[pinut].state);
+		if (btn[pinut].state != BTN_TIMER_HIGH)
 			return -1;
 		break;
 	case 3:
-		printf(" st=%d %02X %d %d %02X %02X\n", btn[0].state, pack.PIO_Activity_Latch_State, alarmflag, sigdone, PORT_REG, PIN_DDR);
+		printf(" st=%d %02X %d %d %02X %02X\n", btn[pinut].state, pack.PIO_Activity_Latch_State, alarmflag, sigdone, PORT_REG, PIN_DDR);
 		// PIO
-		if ((pack.PIO_Activity_Latch_State & 0x4) != 0x04)
+		/* not really correct, but by define the same */
+		if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) != (2 ^ pinut))
 			return -1;
 		if ((alarmflag) != 1)
 			return -1;
 		if (sigdone == 0)
 			return -1;
-		if ((PIN_DDR & 0x4) != 0x4)
+		if ((PIN_DDR & (2 ^ pinut)) != (2 ^ pinut))
 			return -1;
-		if ((PORT_REG & 0x4) != 0)
+		if ((PORT_REG & (2 ^ pinut)) != 0)
 			return -1;
 		break;
 	case 7:
-		printf(" st=%d %02X %d %d %02X %02X\n", btn[0].state, pack.PIO_Activity_Latch_State, alarmflag, sigdone, PORT_REG, PIN_DDR);
+		printf(" st=%d %02X %d %d %02X %02X\n", btn[pinut].state, pack.PIO_Activity_Latch_State, alarmflag, sigdone, PORT_REG, PIN_DDR);
 	}
 
 	return 0;
@@ -204,8 +244,14 @@ static int testCheck(int id)
 extern unsigned long _ms;
 int btnTest()
 {
-	int ret;
+	int ret = 0;
+	static const uint8_t pinut = 2; // pin under test 
 
+	config_info[CFG_PIN_ID] = 0x03;
+	config_info[CFG_BTN_ID] = 0x0C;
+	config_info[CFG_CFG_ID] = CFG_DEFAULT;
+	config_info[CFG_CFG_ID + 1] = CFG_DEFAULT;
+	config_info[CFG_CFG_ID + 2] = CFG_DEFAULT;
 	PIN_REG = 0xfF;
 	PORT_REG = 0;
 	setup();
@@ -216,25 +262,27 @@ int btnTest()
 		if (p->signal)
 			btn_active = 1;
 		if (p->btn)
-			PIN_REG |= 1;
+			PIN_REG |= 2 ^ pinut;
 		else
-			PIN_REG &= ~1;
+			PIN_REG &= ~(2 ^ pinut);
 		sigdone = 0;
 		loop();
 		while (_ms < p->ms && btn_active)
 			loop();
 		if (p->id) {
 			g_testId++;
-			ret = testCheck(g_testId);
+			ret = testCheck(g_testId, pinut);
 			/*if (ret != 0)
 				return -1;*/
 		}
 	}
-	return 0;
+	return ret;
 }
 
 int test_pinset()
 {
+	static const uint8_t pinut = 2; // pin under test 
+
 	config_info[CFG_POL_ID] = 0xfe; // PIO0 reversed pol
 	config_info[CFG_PIN_ID] = 0x01;
 	config_info[CFG_CFG_ID] = CFG_DEFAULT;
@@ -242,29 +290,29 @@ int test_pinset()
 	PIN_REG = 0xfF;
 	PORT_REG = 0;
 	setup();
-	if ((PIN_DDR & 0x1) != 0x1)
+	if ((PIN_DDR & (2 ^ pinut)) != (2 ^ pinut))
 		return -1;
-	if ((PORT_REG & 0x1) != 0)
+	if ((PORT_REG & (2 ^ pinut)) != 0)
 		return -1;
-	if ((pack.PIO_Logic_State & 0x1) != 0x1)
+	if ((pack.PIO_Logic_State & (2 ^ pinut)) != (2 ^ pinut))
 		// must be inactive
 		return -1;
 	// result in setting  output
-	pack.PIO_Output_Latch_State &= ~0x1;
+	pack.PIO_Output_Latch_State &= ~(2 ^ pinut);
 	// activate port
 	latch_out(1);
-	if ((PORT_REG & 0x1) != 0x1)
+	if ((PORT_REG & (2 ^ pinut)) != (2 ^ pinut))
 		return -1;
-	if ((pack.PIO_Logic_State & 0x1) != 0)
+	if ((pack.PIO_Logic_State & (2 ^ pinut)) != 0)
 		// must be active
 		return -1;
 
-	pack.PIO_Output_Latch_State |= 0x1;
+	pack.PIO_Output_Latch_State |= (2 ^ pinut);
 	// activate port
 	latch_out(1);
-	if ((PORT_REG & 0x1) != 0)
+	if ((PORT_REG & (2 ^ pinut)) != 0)
 		return -1;
-	if ((pack.PIO_Logic_State & 0x1) != 0x1)
+	if ((pack.PIO_Logic_State & (2 ^ pinut)) != (2 ^ pinut))
 		// must be inactive
 		return -1;
 
@@ -280,19 +328,10 @@ int test_pinset()
 	return 0;
 }
 
-// Press button on PIN_PIO0 (1<<PINB0)
-void btnPress()
+int pinSignal()
 {
-	btn[0].state = BTN_TIMER_HIGH;
-	btn[0].time = BTN_MINH_TIME + _ms + 1;
-	btn[0].hl_state = BTN_PRESS_LOW;
-	PORTB |= 1;
-	btn_active = 1;
-	loop();
-}
+	static const uint8_t pinut = 2; // pin under test 
 
-void pinSignal()
-{
 	struct tvector pinState[] = {
 		/* ms, pin, signal, remark, id */
 		{ 0, 0, 0,"#0 unstable", 0 },
@@ -308,11 +347,10 @@ void pinSignal()
 		if (p->signal) {
 			btn_active = 1;
 			if (p->btn) {
-				PIN_REG |= 1;
+				PIN_REG |= (2 ^ pinut);
 			}
 			else {
-				PIN_REG = 0xFE;
-				PORTC = 0xFE;
+				PIN_REG &= ~(2 ^ pinut);
 			}
 		}
 		sigdone = 0;
@@ -323,19 +361,22 @@ void pinSignal()
 			g_testId++;
 			switch (g_testId) {
 				case 1:
-					if ((pack.PIO_Logic_State & 0x1) != 1)
+					/* signaled check for correct states */
+					if ((pack.PIO_Logic_State & (2 ^ pinut)) != (2 ^ pinut))
 						return -1;
-					if ((pack.PIO_Activity_Latch_State & 0x1) != 0x01)
+					if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) != (2 ^ pinut))
 						return -1;
 					if ((alarmflag) != 1)
 						return -1;
-					pack.PIO_Activity_Latch_State &= ~0x1;
+					if (bitCount > 1)
+						return -1;
+					pack.PIO_Activity_Latch_State &= ~(2 ^ pinut);
 					alarmflag = 0;
 					break;
 				case 2:
-					if ((pack.PIO_Logic_State & 0x1) != 0)
+					if ((pack.PIO_Logic_State & (2 ^ pinut)) != 0)
 						return -1;
-					if ((pack.PIO_Activity_Latch_State & 0x1) == 0x01)
+					if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) == (2 ^ pinut))
 						return -1;
 					if ((alarmflag) != 0)
 						return -1;
@@ -346,30 +387,33 @@ void pinSignal()
 				return -1;*/
 		}
 	}
+
+	return 0;
 }
 
 int pinChgTest()
 {
+	static const uint8_t pinut = 2; // pin under test 
+
 	/* set up needs it */
-	config_info[CFG_POL_ID] = 0xfe;
-	config_info[CFG_PIN_ID] = 0x00;
-	config_info[CFG_BTN_ID] = 0x01;
-	config_info[4] = 0xff;
-	config_info[CFG_CFG_ID] = CFG_ACT_HIGH;
-	config_info[CFG_CFG_ID + 1] = CFG_DEFAULT;
+	config_info[CFG_POL_ID] = 0xff;
+	config_info[CFG_PIN_ID] = 0x03;
+	// this is wrong, lets test it...
+	config_info[CFG_BTN_ID] = 0xff;
+	config_info[CFG_CFG_ID + pinut] = CFG_ACT_HIGH;
 	/* assume the pin is inactive = low because inverted pol */
-	PIN_REG = 0xfe;
+	PIN_REG = 0xff & (~(2 ^ pinut));
 	PORT_REG = 0x0;
 	setup();
 	// must be low:
-	if ((PORT_REG & 0x1) != 0x0)
+	if ((PORT_REG & (2 ^ pinut)) != 0x0)
 		return -1;
-	if ((DDRB & 0x1) != 0x0)
+	if ((DDRB & (2 ^ pinut)) != 0x0)
 		return -1;
 	/*if ((pack.PIO_Logic_State & 0x1) != 0)
 		return -1;
 	*/
-	pack.PIO_Logic_State &= ~(1);
+	pack.PIO_Logic_State &= ~(2 ^ pinut);
 	pinSignal();
 	pack.PIO_Output_Latch_State &= ~0x2;
 	// activate port
@@ -381,27 +425,29 @@ int pinChgTest()
 
 int switchTest()
 {
+	static const uint8_t pinut = 2; // pin under test 
+
 	/* set up needs it */
 	config_info[CFG_POL_ID] = 0xff;
 	config_info[CFG_CFG_ID] = 0xff;
 
-	config_info[CFG_BTN_ID] = 0x0;
-	config_info[4] = 0xff;
+	config_info[CFG_BTN_ID] = 0x03;
+	config_info[CFG_PIN_ID] = 0x03;
 	config_info[CFG_SW_ID] = 0x2; // 2 = PIO1 (1<<PINB1)
 	setup();
 
 	PIN_REG = 0xfF;
 	PORT_REG = 0;
 	// Button on PIN_PIO0 (1<<PINB0)
-	btnPress();
+	btnPress(pinut);
 	// check for active output PIO1 (1<<PINB1)
-	if ((PIN_DDR & 0x2) != 0x2)
+	if ((PIN_DDR & (2 ^ pinut)) != (2 ^ pinut))
 		return -1;
-	if ((PORT_REG & 0x2) != 0x0)
+	if ((PORT_REG & (2 ^ pinut)) != (2 ^ pinut))
 		return -1;
-	if ((pack.PIO_Logic_State & 0x2) != 0)
+	if ((pack.PIO_Logic_State & (2 ^ pinut)) != 0)
 		return -1;
-	if ((pack.PIO_Activity_Latch_State & 0x2) != 0x2)
+	if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) != (2 ^ pinut))
 		return -1;
 	if (btn_active != 0)
 		return -1;
@@ -411,13 +457,13 @@ int switchTest()
 	loop();
 	if (pack.PIO_Activity_Latch_State != 0)
 		return -1;
-	btnPress();
+	btnPress(pinut);
 	// check for non active output PIO1 (1<<PINB1)
-	if ((PIN_DDR & 0x2) != 0)
+	if ((PIN_DDR & (2 ^ pinut)) != 0)
 		return -1;
-	if ((pack.PIO_Logic_State & 0x2) == 2)
+	if ((pack.PIO_Logic_State & (2 ^ pinut)) == 2)
 		return -1;
-	if ((pack.PIO_Activity_Latch_State & 0x2) != 0x2)
+	if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) != (2 ^ pinut))
 		return -1;
 	if (btn_active != 0)
 		return -1;
@@ -427,13 +473,51 @@ int switchTest()
 	return 0;
 }
 
+int owGlobalTest()
+{
+	/* set up needs it */
+	config_info[CFG_POL_ID] = 0xff;
+	config_info[CFG_PIN_ID] = 0x00;
+	config_info[CFG_BTN_ID] = 0x01;
+	config_info[4] = 0xff;
+	config_info[CFG_CFG_ID] = CFG_DEFAULT;
+	config_info[CFG_CFG_ID + 1] = CFG_DEFAULT;
+	/* assume the pin is inactive = low because inverted pol */
+	PIN_REG = 0xff;
+	PORT_REG = 0x0;
+	setup();
+	pack.PIO_Logic_State &= ~(1);
+	pack.PIO_Output_Latch_State &= ~0x2;
+
+	// activate port
+	gcontrol |= 1;
+	loop();
+	gcontrol |= 2;
+	loop();
+	return 0;
+}
+
 int main()
 {
-	int ret;
-	//pinChgTest();
-	ret = test_pinset();
-	//switchTest();
+	int ret = 0;
 
+	memset (config_info, 0xff, sizeof(config_info));
+	ret = pinChgTest();
+	if (ret != 0)
+		printf ("pinChgTest issue");
+	ret = switchTest();
+	if (ret != 0)
+		printf ("switchTest issue");
+
+	//ret = owGlobalTest();
+	if (ret != 0)
+		printf ("owGlobalTest issue");
+	ret = test_pinset();
+	if (ret != 0)
+		printf ("test_pinset issue");
+
+	if (ret != 0)
+		printf ("issue");
 	return ret;
 }
 #endif

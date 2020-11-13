@@ -32,17 +32,17 @@
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 #define OWST_INIT_ALL_OFF \
+	ACSR = (1<<ACD);  /* Disable Comparator */ \
 	PRR|=(1<<PRUSI)|(1<<PRADC);  /*Switch off usi and adc for save Power*/\
-	ACSR|=(1<<ACD);  /*Disable Comparator*/\
-	ADCSRB|=(1<<ACME); /*Disable Analog multiplexer*/\
+	ADCSRB |= (1<<ACME); /* Disable Analog multiplexer */ \
 	PORTB = 0; /* |= ~(1<<PINB2)... Make PullUp an all Pins but not OW_PIN*/\
-	PORTA = 0xFF - _BV(PA7);
+	PORTA = 0xFF - _BV(PA7)
 
 #define OWST_INIT_ADC_ON \
-PRR|=(1<<PRUSI);  /*Switch off usi and adc for save Power*/\
-ACSR|=(1<<ACD);  /*Disable Comparator*/\
-PORTB = ~(1<<PINB2); /*Make PullUp an all Pins but not OW_PIN*/\
-PORTA = 0xFF;
+	PRR|=(1<<PRUSI);  /*Switch off usi and adc for save Power*/\
+	ACSR|=(1<<ACD);  /*Disable Comparator*/\
+	PORTB = 0; /* |= ~(1<<PINB2)... Make PullUp an all Pins but not OW_PIN*/\
+	PORTA = 0xFF - _BV(PA7)
 
 #define OWST_INIT_USI_ON \
 PRR|=(1<<PRADC);  /*Switch off usi and adc for save Power*/\

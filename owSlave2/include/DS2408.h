@@ -115,7 +115,7 @@
 #define SIG_ACT 1
 #define SIG_ARM 2
 
-#define MIN_VERSION 1
+#define MIN_VERSION 2
 #define MAJ_VERSION 1
 /** 0 means a push button (based on real port pin mask).
  * A state change (alarm) is signaled on releasing the button. 
@@ -153,7 +153,8 @@
  *  0xff = default
  * */
 #define CFG_CFG_ID 11 /* .. 18 */
-#define CFG_DEFAULT 0xff
+#define CFG_DEFAULT 0xff /* Off */
+#define CFG_BTN 0
 #define CFG_ACT_PWM 1
 #define CFG_ACT_HIGH 2 /** signal is active high, no pull up */
 #define CFG_ACT_LOW 3
@@ -161,7 +162,8 @@
 #define CFG_CFG_FEAT 19
 #define FEAT_TEMP 0x01
 
-/* 20 */
+#define CFG_OFFSET 20
+
 #define CFG_VERS_ID 21
 /** Type: 0 - ATiny84 v1
  * 		  1 - ATiny84 v2
