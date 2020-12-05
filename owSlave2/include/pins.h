@@ -6,7 +6,7 @@
  */
 #define BTN_MIN_TIME 25
 #define BTN_MINH_TIME 25
-#define BTN_LONG_PRESS_TIME 450
+#define BTN_LONG_PRESS_TIME 350
 
 /*
  * Button states

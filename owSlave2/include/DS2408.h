@@ -115,7 +115,7 @@
 #define SIG_ACT 1
 #define SIG_ARM 2
 
-#define MIN_VERSION 2
+#define MIN_VERSION 3
 #define MAJ_VERSION 1
 /** 0 means a push button (based on real port pin mask).
  * A state change (alarm) is signaled on releasing the button. 
@@ -158,6 +158,7 @@
 #define CFG_ACT_PWM 1
 #define CFG_ACT_HIGH 2 /** signal is active high, no pull up */
 #define CFG_ACT_LOW 3
+#define CFG_PASS 4 /** Level is passed as is, alarm on change */
 
 #define CFG_CFG_FEAT 19
 #define FEAT_TEMP 0x01

@@ -1,5 +1,6 @@
 
 // Copyright (c) 2018, Tobias Mueller tm(at)tm3d.de
+// Copyright (c) 2020, INgo Rah INgo.Rah@gmx.net
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
@@ -292,12 +293,6 @@ void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 			PIN_DDR |= p;
 			PORT_REG &= ~p;
 			pack.PIO_Logic_State |= bb;
-			if (config_info[CFG_CFG_ID + id] == 1)
-#if defined(__AVR_ATtiny85__)
-				GTCCR &= ~(1<<PWM1B);
-#else
-				;
-#endif
 		} else {
 			/* enable pull up */
 			PIN_DDR &= ~(p);
@@ -316,15 +311,6 @@ void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 			/* set output and low on 0 */
 			PIN_DDR |= p;
 			PORT_REG &= ~p;
-		}
-		if (config_info[CFG_CFG_ID + id] != 0xff) {
-#if defined(__AVR_ATtiny85__)
-			OCR1B = (pack.PIO_Output_Latch_State & 0xf0) >> 4;
-			// PWM-Mode, !OC1B set on compare match, Cleared when TCNT1 = 0
-			GTCCR = (1<<PWM1B) | (1<<COM1B0);
-#else
-				;
-#endif
 		}
 	}
 }
@@ -507,6 +493,9 @@ void reg_init(void)
 	if (config_info[CFG_CFG_ID] == CFG_ACT_PWM) {
 		/* PWM on PB4 */
 		PCMSK &= ~(_BV(PB4));
+		PIN_DDR |= _BV(PB4);
+		/* no pull up */
+		PORT_REG &= ~_BV(PB4);
 #endif
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 	if (config_info[CFG_CFG_ID + 5] == CFG_ACT_PWM) {
@@ -517,7 +506,7 @@ void reg_init(void)
 #ifndef ATMEGA
 	} else {
 		/* timer 1 not needed */
-		PRR |= PRTIM1;
+		PRR |= _BV(PRTIM1);
 	}
 #endif
 	sync_pins();
@@ -615,7 +604,12 @@ void temp_read()
 	PRR &= ~(1<<PRADC);
 	_delay_us (10);
 	ADCSRB &= ~(1<<ACME);
+#if defined(__AVR_ATtiny85__)
+	ADMUX = _BV(REFS1) | 0xf; // ADC4 B1111
+#endif
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 	ADMUX = _BV(REFS1) | 0x22; // B00100010
+#endif
 	/* prescaler of 128 */
 	ADCSRA = (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0) | (1<<ADEN);
 	_delay_us (20);
@@ -645,6 +639,8 @@ void temp_read()
 void ow_loop()
 {
 	static uint8_t out_latch = 0xff;
+	static const uint8_t pwm_tbl[16] = { 1, 2, 3, 5, 8, 13, 21, 30, 35, 40, 45, 50, 55, 60, 70, 80 };
+
 	if (reset_indicator) {
 		ap = 0;
 		// stat_to_sample=0;
@@ -666,14 +662,23 @@ void ow_loop()
 		else if (config_info[CFG_CFG_ID] == CFG_ACT_PWM) {
 #if defined(__AVR_ATtiny85__)
 			if (pack.PIO_Output_Latch_State > 0) {
-				TCCR1 = (1<<CTC1) | (1<<CS13);
-				OCR1C = 0xf;
-				GTCCR = (1<<PWM1B) | (1<<COM1B0);
-				OCR1B = (pack.PIO_Output_Latch_State & 0xf0) >> 4;
+				/* wake up timer */
+				PRR &= ~_BV(PRTIM1);
+				_delay_us(10);
+				TCNT1 = pwm_tbl[15] + 1; // maybe not needed ...
+				// timer on, timer cleared on compare match with OCR1C, prescaler 1/128 => F_TIMER = 31kHz
+				TCCR1 = _BV(CTC1) | _BV(CS13);
+				OCR1C = pwm_tbl[15] + 1;
+				// PWM-Mode, OC1B (PB4) cleared on compare match, set when TCNT1 = OCR1C
+				GTCCR = _BV(PWM1B) | _BV(COM1B0);
+				OCR1B = pwm_tbl[(pack.PIO_Output_Latch_State & 0xf0) >> 4];
 			}
 			else {
+				/* stop timer and disconnect output, shut down timer to save power */
 				TCCR1 = 0;
 				GTCCR = 0;
+				_delay_us(1);
+				PRR |= _BV(PRTIM1);
 			}
 #endif
 		} else if (config_info[CFG_CFG_ID + 5] == CFG_ACT_PWM) {
@@ -682,7 +687,7 @@ void ow_loop()
 				/* PWM on PA5 / PIO5 */
 				TCCR1A = _BV(COM1B1) /*| _BV(COM1B0)*/ | _BV(WGM00);
 				TCCR1B = /*_BV(WGM13) | _BV(WGM12) | */ _BV(CS12);
-				OCR1B = pack.PIO_Output_Latch_State;
+				OCR1B = pwm_tbl[(pack.PIO_Output_Latch_State & 0xf0) >> 4];
 			} else {
 				TCCR1A = 0;
 				TCCR1B = 0;
@@ -783,20 +788,20 @@ static uint8_t auto_switch(uint8_t i)
 
 uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 {
-	uint8_t act_btns = 0, out;
+	uint8_t act_btns = 0;
 
 	switch (st) {
 	case BTN_PRESSED_LONG:
-		/* active low but for longer time */
-		pack.FF1 = p->press / 8;
+		/* active low but for longer time, signal start of pressing long */
+		pack.FF1 = 0;
 		// get the next edge
 		act_btns |= mask;
-		statusPrint();
+		act_latch(1, mask);
 		break;
 	case BTN_PRESSED:
 		/* short pressed and done */
 		wdr();
-		pack.FF1 = p->press / 8;
+		pack.FF1 = p->press / 32;
 		if (auto_switch(i) == 0)
 			act_latch(1, mask);
 		printf ("#%i press\n", i);
@@ -811,7 +816,7 @@ uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 		wdr();
 		/* long pressed done for push buttons or
 			toggled the switch */
-		pack.FF1 = p->press / 8;
+		pack.FF1 = p->press / 32;
 		act_latch(1, mask);
 		printf ("#%i release\n", i);
 		break;
