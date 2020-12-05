@@ -59,3 +59,10 @@ dkms.conf
 *.esproj
 /html
 config.h
+*.dblite
+project.checksum
+.vscode
+.pio
+*.bak
+*-cache
+*-bak
