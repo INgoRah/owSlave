@@ -56,9 +56,6 @@
 #define zl 30
 #define zh 31
 
-.extern owid,8
-.extern config_info,26
-
 .comm mode,1  ; Aktueller Zustand nach dem die Unterprogramme aufgerufen werden
 .comm srbyte,1 ; aktuelles Byte fuer Searchrom
 .comm bytep,1 ; pointer fuer Zugriffe auf owid usw
@@ -68,6 +65,9 @@
 .comm gcontrol,1  ;im Test
 .comm reset_indicator,1  ; zeigt an wenn ein Reset empfangen wurde (Fuer das C Programm)
 .comm alarmflag,1
+#ifdef DUAL_ROM
+.comm alarmflag2,1
+#endif
 #ifndef _DIS_FLASH_
 .comm flashmarker,1
 #endif

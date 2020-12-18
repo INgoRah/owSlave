@@ -1,13 +1,15 @@
 #ifndef OWSLAVE_TOOLS_H
 #define OWSLAVE_TOOLS_H
 
-#define OWST_EXTERN_VARS
-	extern uint8_t mode;\
-	extern uint8_t gcontrol;\
-	extern uint8_t reset_indicator;\
-	extern uint8_t alarmflag; \
-	extern void OWINIT(void);\
-	extern void EXTERN_SLEEP(void);
+extern uint8_t mode;
+extern uint8_t gcontrol;
+extern uint8_t reset_indicator;
+extern uint8_t alarmflag;
+#ifdef DUAL_ROM
+extern uint8_t alarmflag2;
+#endif
+extern void OWINIT(void);
+extern void EXTERN_SLEEP(void);
 
 #if defined(__AVR_ATtiny85__)
 #define OWST_INIT_ALL_OFF \
@@ -31,6 +33,9 @@
 #endif /* __AVR_ATtiny85__ */
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+/* have the same name for the second timer as in AT85. This is used for PWM */
+#define TCCR1 TCCR1B
+
 #define OWST_INIT_ALL_OFF \
 	ACSR = (1<<ACD);  /* Disable Comparator */ \
 	PRR|=(1<<PRUSI)|(1<<PRADC);  /*Switch off usi and adc for save Power*/\
@@ -84,26 +89,6 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 	WDTCSR |=   (1<<WDIE) |              /* Enable WDT Interrupt*/\
 	(1<<WDP2) | (1<<WDP1);   /*Set Timeout to ~1 seconds*/
 
-
-#define OWST_TESTSW \
-	int testSW(void) {\
-		uint8_t r;\
-		DDRB&=~(1<<PORTB0);  /*Eingang*/\
-		__asm__ __volatile__ ("nop");\
-		PORTB|=(1<<PORTB0); /*Pullup*/\
-		__asm__ __volatile__ ("nop");\
-		__asm__ __volatile__ ("nop");\
-		__asm__ __volatile__ ("nop");\
-		__asm__ __volatile__ ("nop");\
-		__asm__ __volatile__ ("nop");\
-		r=PINB&(1<<PORTB0);\
-		__asm__ __volatile__ ("nop");\
-		PORTB&=~(1<<PORTB0);\
-		__asm__ __volatile__ ("nop");\
-		DDRB|=(1<<PORTB0);  /*Eingang*/\
-		return (r==0);\
-	}\
-
 #define OWST_MAIN_END \
 	if (((TIMSK0 & (1<<TOIE0)) == 0) && mode==0) { \
 		MCUCR &= ~(1<<ISC01); 					\
@@ -111,23 +96,12 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 	} else										\
 		set_sleep_mode(SLEEP_MODE_IDLE);
 
-/*
-#define OWST_MAIN_END \
-	GIMSK |= (1 << PCIE0); \
-	if (((TIMSK0 & (1<<TOIE0))==0)&& (mode==0))	{\
-		MCUCR |= (1<<SE)|(1<<SM1);\
-		MCUCR &= ~(1<<ISC01);\
-	} else {\
-		MCUCR |= (1<<SE);\
-		MCUCR &= ~(1<<SM1);\
-	}\
-	asm("SLEEP");
-*/
-
 #endif /* __AVR_ATtinyx4__ */
 
 #if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
 #define ATMEGA
+#define TCCR1 TCCR1B
+
 #define OWST_INIT_ALL_OFF \
 	PRR|=(1<<PRTWI)|(1<<PRSPI)|(1<<PRADC);  /*Switch off SPI/TWI and adc for save Power*/\
 	ACSR|=(1<<ACD);  /*Disable Comparator*/\
@@ -136,7 +110,7 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 
 #define OWST_INIT_ALL_ON \
 	PORTA|=0xFF;
-	
+
 #define OWST_EN_PULLUP MCUCR &=~(1<<PUD); /*All Pins Pullup...*/
 
 #define OWST_WDT_ISR
@@ -152,7 +126,8 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 
 //********************** AD_WANDLER ********************************
 //******************************************************************
-//clock fuer ADC 50kHz - 200kHz     8M / 128 = 62500   = 4M/64   erste Messng 25 = 0,4ms / zweite Messung 13 rund 0,21ms
+//clock fuer ADC 50kHz - 200kHz     8M / 128 = 62500   = 4M/64
+// erste Messng 25 = 0,4ms / zweite Messung 13 rund 0,21ms
 #ifdef __4MHZ__
 #define OWST_INIT_ADC \
 ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1);
@@ -224,6 +199,6 @@ double owst_ADC_OSS_runf() {/*964ms*/\
 	r+=5150;\
 	r*=0.9993;\
 	return r/64.0;\
-} 
+}
 
 #endif
