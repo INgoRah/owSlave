@@ -1,34 +1,34 @@
 // Copyright (c) 2017, Tobias Mueller tm(at)tm3d.de
-// All rights reserved. 
-// 
-// Redistribution and use in source and binary forms, with or without 
-// modification, are permitted provided that the following conditions are 
-// met: 
-// 
-//  * Redistributions of source code must retain the above copyright 
-//    notice, this list of conditions and the following disclaimer. 
-//  * Redistributions in binary form must reproduce the above copyright 
-//    notice, this list of conditions and the following disclaimer in the 
-//    documentation and/or other materials provided with the 
-//    distribution. 
-//  * All advertising materials mentioning features or use of this 
-//    software must display the following acknowledgement: This product 
-//    includes software developed by tm3d.de and its contributors. 
-//  * Neither the name of tm3d.de nor the names of its contributors may 
-//    be used to endorse or promote products derived from this software 
-//    without specific prior written permission. 
-// 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the
+//    distribution.
+//  * All advertising materials mentioning features or use of this
+//    software must display the following acknowledgement: This product
+//    includes software developed by tm3d.de and its contributors.
+//  * Neither the name of tm3d.de nor the names of its contributors may
+//    be used to endorse or promote products derived from this software
+//    without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 .macro cjmp val,addr
 	cpi r_rwbyte,\val
@@ -71,7 +71,7 @@
 #define OW_FIRST_COMMAND 15
 .comm newid,8
 
-   
+
 .macro CHANGE_ID_COMMANDS
 	cset 0x75,OW_WRITE_NEWID
 	cljmp 0xA7,hrc_set_readid
@@ -104,13 +104,13 @@
 	cljmp 0x85,hrc_fw_configinfo2
 .endm
 
-handle_stable: 
+handle_stable:
 		rjmp handle_end_no_bcount // sleep eventuell reset, nichts tun und auf Timeout warten
-		rjmp h_readromcommand 
-		rjmp h_matchrom 
-		rjmp h_searchroms 
+		rjmp h_readromcommand
+		rjmp h_matchrom
+		rjmp h_searchroms
 		rjmp h_searchromr
-		rjmp h_readcommand 
+		rjmp h_readcommand
 		rjmp h_readcommand2
 #ifdef _HANDLE_CC_COMMAND_
 		rjmp h_readcommand12
@@ -157,11 +157,25 @@ hrc_set_matchrom:
 	ldi r_mode,OW_MATCHROM
 	rjmp handle_end
 
-hrc_set_searchrom:	
+hrc_set_searchrom:
 	ldi r_temp,3
 	sts srbyte,r_temp ; Beide geraete nehmen an searchrom teil
 	configZ idtable,r_bytep
 	rjmp h_searchrom_next_bit
+
+hrc_set_alarm_search:
+	lds r_temp,alarmflag
+	tst r_temp
+	ldi r_temp,1
+	;alarm flag nicht 0 also gehe zu searchrom mit id1
+	brne h_set_searchrom
+	lds r_temp,alarmflag2
+	tst r_temp
+	;alarm flag nicht 0 also gehe zu searchrom
+	ldi r_temp,2
+	brne h_set_searchrom
+	; sonst tue nichts
+	rjmp handle_end_sleep
 
 hrc_start_read_command: ;Skip rom und Matchrom ok...
 	CRCInit1
@@ -184,38 +198,10 @@ hrc_start_read_command12:
 	rjmp handle_end
 #endif
 
-hrc_set_alarm_search:
-	lds r_temp,alarmflag
-	tst r_temp
-	;alarm flag nicht 0 also gehe zu searchrom
-	brne hrc_set_searchrom_id1
-	; sonst tue nichts
-	rjmp handle_end_sleep
-
-hrc_fw_configinfo1:
-#ifdef _NO_CONFIGBYTES_
-	rjmp handle_end_sleep
-#else
-	ldi r_mode,OW_FWCONFIGINFO1
-	ldi r_sendflag,1
-	CRCInit2
-	rjmp h_fwconfiginfo1
-#endif
-
-hrc_fw_configinfo2:
-#ifdef _NO_CONFIGBYTES_
-	rjmp handle_end_sleep
-#else
-	ldi r_mode,OW_FWCONFIGINFO2
-	ldi r_sendflag,1
-	CRCInit2
-	rjmp h_fwconfiginfo2
-#endif
-
 ;---------------------------------------------------
 ;   MATCH ROM
 ;---------------------------------------------------
-	
+
 h_matchrom:
 	lds r_bcount,srbyte
 	sbrs r_bcount,0 ;ueberspringe wenn bit 1 =0 also geraet 1 nich mehr im rennen
@@ -248,8 +234,7 @@ h_matchrom_sleep:
 ;   SEARCH ROM
 ;---------------------------------------------------
 
-hrc_set_searchrom_id1:
-	ldi r_temp,1
+h_set_searchrom:
 	; srbyte: aktuelles Byte fuer Searchrom
 	sts srbyte,r_temp ; only owid1 participates in searchrom
 	configZ idtable,r_bytep
@@ -271,7 +256,7 @@ h_searchrom_next_bit_l1:
 	lsr r_temp2
 	rol r_rwbyte  ; bit in rwbyte
 	ldi r_sendflag,1
-	ldi r_bcount,0x40 ; zwei bits sensden dann zu Searchromr 
+	ldi r_bcount,0x40 ; zwei bits sensden dann zu Searchromr
 	ldi r_mode,OW_SEARCHROMR
 	rjmp handle_end_no_bcount
 
@@ -295,7 +280,7 @@ h_searchroms_idd:
 	sbrc r_temp2,4  ;id1 set? then skip
 	cbr r_temp,1  ; loesche bit 1 in srbyte
 	sbrc r_temp2,2 ; springe wenn id 2 gesetzt ist
-	cbr r_temp,2 ;  loesche bit 2 in srbyte 
+	cbr r_temp,2 ;  loesche bit 2 in srbyte
 	sts srbyte,r_temp
 	rjmp h_searchroms_idX_end
 h_searchroms_idd_zero:
@@ -314,7 +299,7 @@ h_searchroms_id1:
 	sbrs r_temp2,5  ;id1 set? then skip
 	rjmp handle_end_sleep ;
 	rjmp h_searchroms_idX_end
-h_searchroms_id1_zero:		
+h_searchroms_id1_zero:
 	sbrs r_temp2,4  ;id1 set? then skip
 	rjmp handle_end_sleep ;
 	rjmp h_searchroms_idX_end
@@ -325,7 +310,7 @@ h_searchroms_id2:
 	sbrs r_temp2,3  ;id1 set? then skip
 	rjmp handle_end_sleep ;
 	rjmp h_searchroms_idX_end
-h_searchroms_id2_zero:		
+h_searchroms_id2_zero:
 	sbrs r_temp2,2  ;id1 set? then skip
 	rjmp handle_end_sleep ;
 	rjmp h_searchroms_idX_end
@@ -354,6 +339,25 @@ h_searchromr:  ; stelle um auf empfangen
 ;---------------------------------------------------
 ;   FW_CONFIG_INFO
 ;---------------------------------------------------
+hrc_fw_configinfo1:
+#ifdef _NO_CONFIGBYTES_
+	rjmp handle_end_sleep
+#else
+	ldi r_mode,OW_FWCONFIGINFO1
+	ldi r_sendflag,1
+	CRCInit2
+	rjmp h_fwconfiginfo1
+#endif
+
+hrc_fw_configinfo2:
+#ifdef _NO_CONFIGBYTES_
+	rjmp handle_end_sleep
+#else
+	ldi r_mode,OW_FWCONFIGINFO2
+	ldi r_sendflag,1
+	CRCInit2
+	rjmp h_fwconfiginfo2
+#endif
 
 h_fwconfiginfo1:
 #ifdef _NO_CONFIGBYTES_
@@ -370,7 +374,7 @@ h_fwconfiginfo2:
 	cpi  r_bytep,26
 	breq h_fwconfiginfo_all
 //h_fwconfiginfo_end:
-	//configZ config_info1,r_bytep  //crc16 wird in config_info1 gespeichert, auch bei config_info2 
+	//configZ config_info1,r_bytep  //crc16 wird in config_info1 gespeichert, auch bei config_info2
 	configZ config_info2,r_bytep
 	ld   r_rwbyte,Z
 	rjmp handle_end_inc
@@ -380,7 +384,7 @@ h_fwconfiginfo2:
 h_fwconfiginfo_go:
 	cpi  r_bytep,24
 	breq h_fwconfiginfo_crc
-#if defined(_CRC8_)  || defined( _CRC8_16_) 
+#if defined(_CRC8_)  || defined( _CRC8_16_)
 	cpi  r_bytep,25
 	breq h_fwconfiginfo_all
 #elif defined _CRC16_
@@ -393,12 +397,12 @@ h_fwconfiginfo_go:
 #endif
 
 h_fwconfiginfo_end:
-	//configZ config_info1,r_bytep  //crc16 wird in config_info1 gespeichert, auch bei config_info2 
+	//configZ config_info1,r_bytep  //crc16 wird in config_info1 gespeichert, auch bei config_info2
 	//configZ config_info1,r_bytep
 	ld   r_rwbyte,Z
 	rjmp handle_end_inc
 h_fwconfiginfo_crc:
-#ifdef _CRC8_ 
+#ifdef _CRC8_
 	lds r_rwbyte,crc
 	rjmp handle_end_inc
 #elif defined _CRC16_
@@ -487,7 +491,7 @@ h_setido:
 	brne h_setid_bad_code_all
 	cpi r_bytep,1
 	breq h_setid_set2
-	cpi r_bytep,5 
+	cpi r_bytep,5
 	breq h_setid_set3
 	cpi r_bytep,6
 	breq h_setid_copy_id
@@ -501,18 +505,12 @@ h_setid_set3:
 h_setid_copy_id:
 	ldi r_temp2,lo8(0)
 	ldi zh,hi8(0)
-	ldi r_temp,7
-	sbrc r_bcount,1
-	ldi r_temp,15
-	sub r_temp2,r_temp
-	;ldi r_temp,0 ;kommt nicht vor das ein E2ROM genau n*256+(0 bis 7) byte gross ist
-	;sbc zh
 	out _SFR_IO_ADDR(EEARH),zh
 	ldi zl,lo8(newid)
 	ldi zh,hi8(newid)
 	ldi r_bytep,0
 h_setid_EEPROM_write:
-	sbic _SFR_IO_ADDR(EECR), EEPE	
+	sbic _SFR_IO_ADDR(EECR), EEPE
 	rjmp h_setid_EEPROM_write
 	ldi r_temp, (0<<EEPM1)|(0<<EEPM0)
 	out _SFR_IO_ADDR(EECR), r_temp
@@ -526,6 +524,9 @@ h_setid_EEPROM_write:
 	inc r_temp2
 	cpi r_bytep,8
 	brne h_setid_EEPROM_write
+	; reset system
+	cli
+	rjmp 0
 	//rcall read_EEPROM_ID1
 	//rcall read_EEPROM_ID2
 	push r_idm1
@@ -553,12 +554,12 @@ spause:
 
 .global OWINIT
 OWINIT:
-	
+
 ; check for bootloader jumper
 	;vor allen anderen Registerconfigs
 	push r_temp
 #ifndef _DIS_FLASH_
-	CHECK_BOOTLOADER_PIN 
+	CHECK_BOOTLOADER_PIN
 #endif
 	HW_INIT  //Microcontroller specific
 	CHIP_INIT //1-Wire device specific
@@ -593,14 +594,14 @@ owinit_odgen1:
 owinit_odgen2:
 	ldi r_mode,0
 	lsr r_idm1
-	rol r_mode  ;6. Bit id1 
-	lsr r_idn1  
+	rol r_mode  ;6. Bit id1
+	lsr r_idn1
 	rol r_mode ; 5. Bit id1negiert
 	lsr r_idm2
-	rol r_mode  ;;4. Bit id2 
-	lsr r_idn2  
+	rol r_mode  ;;4. Bit id2
+	lsr r_idn2
 	rol r_mode  ;3. Bit id2 negiert
-	lsr r_temp 
+	lsr r_temp
 	rol r_mode ;zweites bit  id1 und id2
 	lsr r_temp2
 	rol r_mode   ;erstes bit id1 negiert und id2  negiert
@@ -621,7 +622,7 @@ owinit_odgen2:
 	pop r_temp
 	pop yh
 	pop yl
-	
+
 	ret
 
 .global EXTERN_SLEEP

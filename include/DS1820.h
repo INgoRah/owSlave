@@ -14,4 +14,7 @@ typedef union {
 	};
 } packt_t;
 
+void temp_setup();
+void temp_loop();
+
 #endif /* DS1820_H */

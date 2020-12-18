@@ -110,7 +110,7 @@
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
 #endif
 #ifndef MAX_BTN
-#define MAX_BTN 7
+#define MAX_BTN 8
 #endif
 #endif
 
@@ -135,15 +135,22 @@
 #define CFG_UNUSED 0
 /* input */
 
-/** signal is active high, no pull up. Touch input with short high output.
- * Reacts only on rising edge */
-#define CFG_ACT_HIGH 2 
+/** Signal is active high, no pull up. Touch input with short high output.
+ * Reacts only on rising edge and thus does not support auto switch */
+#define CFG_ACT_HIGH 2
+/** Signal is active low, no pull up. Input with short low output.
+ * Reacts only on falling edge and thus does not support auto switch */
 #define CFG_ACT_LOW 3
 /** Active low with pull up */
 #define CFG_ACT_LOW_PU 4
 #define CFG_PASS 5 /** Level is passed as is, alarm on change */
+/** Level is passed with inverted logig, alarm on change */
+#define CFG_PASS_INV 6
+/** Level is passed with inverted logig, alarm on change
+ *  Enables a pull up */
+#define CFG_PASS_INV_PU 7
 #define CFG_BTN_MASK 0x10 /** button mask */
-/** Press button with validation and long press detection. 
+/** Press button with validation and long press detection.
  * A 1 represents normal polarity (push button to ground) with
  * pull-up resistor. High is inactive, low pushed */
 #define CFG_BTN 0x10
@@ -155,10 +162,10 @@
 
 /** Active low output (default DS2408 behaviour).
  * Represents normal polarity (open collector)
- * Set PIO to 0 = conducting, on, pin active low 
+ * Set PIO to 0 = conducting, on, pin active low
  * set 1 / non-conducting (off), input
 */
-#define CFG_OUT_LOW 0x21 
+#define CFG_OUT_LOW 0x21
 
 /** Active high output. Used for output via transistor.
  * Set 0 = on, pin is active high (no input)
@@ -176,7 +183,9 @@
 
 #define CFG_VERS_ID 21
 /** Type: 0 - ATiny84 v1
+ * 		  10 - ATiny84 v1 with DS1820
  * 		  1 - ATiny84 v2
+ * 		  11 - ATiny84 v2 with DS1820
  *  	  2 - ATiny85 v1
  * 		  3 - ATiny84 custom
  * 		  4 - ATMega v1
@@ -209,5 +218,8 @@ typedef union {
 
 	};
 } pack_t;
+
+uint8_t auto_switch(uint8_t i, uint8_t val);
+void latch_out(uint8_t bb);
 
 #endif /* DS2408_H */
