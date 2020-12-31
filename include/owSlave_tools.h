@@ -36,13 +36,13 @@
 	PRR|=(1<<PRUSI)|(1<<PRADC);  /*Switch off usi and adc for save Power*/\
 	ADCSRB |= (1<<ACME); /* Disable Analog multiplexer */ \
 	PORTB = 0; /* |= ~(1<<PINB2)... Make PullUp an all Pins but not OW_PIN*/\
-	PORTA = 0xFF - _BV(PA7)
+	PORTA = 0xFF
 
 #define OWST_INIT_ADC_ON \
 	PRR|=(1<<PRUSI);  /*Switch off usi and adc for save Power*/\
 	ACSR|=(1<<ACD);  /*Disable Comparator*/\
 	PORTB = 0; /* |= ~(1<<PINB2)... Make PullUp an all Pins but not OW_PIN*/\
-	PORTA = 0xFF - _BV(PA7)
+	PORTA = 0xFF
 
 #define OWST_INIT_USI_ON \
 PRR|=(1<<PRADC);  /*Switch off usi and adc for save Power*/\

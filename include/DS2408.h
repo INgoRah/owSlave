@@ -67,7 +67,7 @@
 #define PIN_REG PINB
 #define PIN_DDR DDRB
 
-#define PIN_PIO0 _BV(PB4) /* light : ouput */
+#define PIN_PIO0 _BV(PB4) /* light : ouput/PWM */
 #define PIN_PIO1 _BV(PB3)
 #define PIN_PIO2 _BV(PB1)
 #define PIN_PIO3 _BV(PB0) /* light switch: input */
@@ -78,7 +78,9 @@
 #define	LED2_ON() do {  }while(0)
 #define	LED2_OFF() do { }while(0)
 #endif
+#ifndef MAX_BTN
 #define MAX_BTN 2
+#endif
 #endif
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
@@ -88,6 +90,7 @@
 #define PIN_REG PINA
 #define PORT_REG PORTA
 #define PIN_DDR DDRA
+#define PCMSK PCMSK0
 
 #define PIN_PIO0 (1<<PINA1)	// predefined output 1
 #define PIN_PIO1 (1<<PINA0)	// predefined output 2
@@ -96,17 +99,19 @@
 #define PIN_PIO4 (1<<PINA4)
 #define PIN_PIO5 (1<<PINA5)
 #define PIN_PIO6 (1<<PINA6)
+#define PIN_PIO7 (1<<PINA7)
 #define LED _BV(PB1)
 #define LED2 _BV(PB0)
 
-#define PCMSK PCMSK0
 #ifdef WITH_LEDS
 #define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
 #define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
 #define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
 #endif
+#ifndef MAX_BTN
 #define MAX_BTN 7
+#endif
 #endif
 
 #define CHAN_VALUES 16
@@ -117,48 +122,52 @@
 
 #define MIN_VERSION 3
 #define MAJ_VERSION 1
-/** 0 means a push button (based on real port pin mask).
- * A state change (alarm) is signaled on releasing the button. 
- * 1 represents a simple input with bouncing, no press button
- * A state change (alarm) is signaled on low and high. 
- */
-#define CFG_BTN_ID 0
-/**  A 1 represents an output pin otherwise input
- *   (based on real port pin mask).
- **/
-#define CFG_PIN_ID 1
-/** Used for output via transistor.
- * A 1 represents normal polarity (open collector). Based on real port
- * pin mask.
- * Set 0 = conducting, on, pin active low 
- * set 1 / non-conducting (off), input
- * A 0 means reversed polarity for transistor output:
- * Set 0 = on, pin is active high (no input)
- * Set 1 = off, inactive, pin is in high resistive not
- *         driving high, no pullup
- * Logic state represents the transistor output, not pin output
- * For input: a 1 represents normal polarity (push button to ground) with
- *   pull-up resistor. High is inactive, low pushed
- *   A 0 means high active, low inactive. No pull-up enabled.
- */
-#define CFG_POL_ID 2
+
 /** Auto switch config for each PIO
  *  0xff = default / off
  * */
 #define CFG_SW_ID 3  /* .. 10 */
-/** PIO configuration
- *  1 = PWM output
- *  2 = Touch input with short high output. Reacts only on rising edge
- *  3 = Touch input with short high output. Reacts only on rising edge
- *  0xff = default
- * */
+/*
+ * PIO configuration
+ */
 #define CFG_CFG_ID 11 /* .. 18 */
-#define CFG_DEFAULT 0xff /* Off */
-#define CFG_BTN 0
-#define CFG_ACT_PWM 1
-#define CFG_ACT_HIGH 2 /** signal is active high, no pull up */
+#define CFG_DEFAULT 0xff /* =0x10 / press button */
+#define CFG_UNUSED 0
+/* input */
+
+/** signal is active high, no pull up. Touch input with short high output.
+ * Reacts only on rising edge */
+#define CFG_ACT_HIGH 2 
 #define CFG_ACT_LOW 3
-#define CFG_PASS 4 /** Level is passed as is, alarm on change */
+/** Active low with pull up */
+#define CFG_ACT_LOW_PU 4
+#define CFG_PASS 5 /** Level is passed as is, alarm on change */
+#define CFG_BTN_MASK 0x10 /** button mask */
+/** Press button with validation and long press detection. 
+ * A 1 represents normal polarity (push button to ground) with
+ * pull-up resistor. High is inactive, low pushed */
+#define CFG_BTN 0x10
+
+#define CFG_SW 0x11 /** switch button */
+
+/* output */
+#define CFG_OUT_MASK 0x20
+
+/** Active low output (default DS2408 behaviour).
+ * Represents normal polarity (open collector)
+ * Set PIO to 0 = conducting, on, pin active low 
+ * set 1 / non-conducting (off), input
+*/
+#define CFG_OUT_LOW 0x21 
+
+/** Active high output. Used for output via transistor.
+ * Set 0 = on, pin is active high (no input)
+ * Set 1 = off, inactive, pin is in high resistive not
+ *         driving high, no pullup
+ * Logic state represents the transistor output, not pin output
+ */
+#define CFG_OUT_HIGH 0x22
+#define CFG_OUT_PWM 0x23
 
 #define CFG_CFG_FEAT 19
 #define FEAT_TEMP 0x01
