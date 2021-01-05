@@ -59,6 +59,10 @@
 #include "DS1820.h"
 #endif
 
+#ifdef WITH_TFT
+#include "st7735.h"
+#endif
+
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
 extern uint8_t stat_to_sample;
@@ -644,6 +648,9 @@ void setup()
 	var_init();
 	reg_init();
 	sei();
+#ifdef WITH_TFT
+	lcdInit();
+#endif
 #ifndef AVRSIM
 	_delay_ms(100);
 #endif
@@ -728,8 +735,55 @@ void ow_loop()
 #endif
 	if (gcontrol & 1) {
 		/* write, data in PIO_Output_Latch_State */
-		uint8_t i;
+#ifdef WITH_TFT
+		static uint8_t d_cnt = 0, id;
+		static uint8_t x = 0, y = 10;
 
+		if (d_cnt++ == 0) {
+			id = pack.PIO_Output_Latch_State;
+		} else {
+			d_cnt = 0;
+			switch (id)
+			{
+			case 1:
+				x = 4;
+				drawChar(x, 8, 'W', COLOR_CYAN, COLOR_BLACK, 1, 1);
+				x += 6;
+				drawChar(x, 8, 'O', COLOR_CYAN, COLOR_BLACK, 1, 1);
+				x += 6;
+				drawChar(x, 8, 'H', COLOR_CYAN, COLOR_BLACK, 1, 1);
+				x += 6;
+				drawChar(x, 8, 'N', COLOR_CYAN, COLOR_BLACK, 1, 1);
+				x = 4;
+				drawChar(x, 28, '2', COLOR_GREEN, COLOR_BLACK, 2, 2);
+				x += 11;
+				drawChar(x, 28, '0', COLOR_GREEN, COLOR_BLACK, 2, 2);
+				x += 11;
+				drawChar(x, 28, '.', COLOR_GREEN, COLOR_BLACK, 2, 2);
+				x += 11;
+				drawChar(x, 28, '5', COLOR_GREEN, COLOR_BLACK, 2, 2);
+				x += 11;
+				drawChar(x, 28, '°', COLOR_GREEN, COLOR_BLACK, 2, 2);
+				break;
+			case 0x80:
+				st7735InitDisplay();
+				break;
+			
+			default:
+				break;
+			}
+			drawChar(x, y, pack.PIO_Output_Latch_State, COLOR_CYAN, COLOR_BLACK, 2, 2);
+			x += 11;
+			if (x > 160) {
+				x = 0;
+				y += 10;
+			}
+			if (y > 128)
+				y = 0;
+		}
+		//st7735WriteCmd(ST77XX_DISPOFF);
+#else
+		uint8_t i;
 		if (config_info[CFG_CFG_ID] == CFG_OUT_PWM) {
 #if defined(__AVR_ATtiny85__)
 			if (pack.PIO_Output_Latch_State > 0) {
@@ -769,6 +823,7 @@ void ow_loop()
 			for (i = 1; i < 0x80; i = i * 2)
 				latch_out(i);
 		}
+#endif		
 		// avoid signal generation
 		int_signal = SIG_NO;
 		gcontrol &= ~0x01;

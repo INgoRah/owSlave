@@ -1,0 +1,684 @@
+/**************************************************************************/
+/*! 
+    @file     st7735.c
+    @author   K. Townsend (microBuilder.eu)
+
+    @section  DESCRIPTION
+
+    Driver for st7735 128x160 pixel TFT LCD displays.
+    
+    This driver uses a bit-banged SPI interface and a 16-bit RGB565
+    colour palette.
+
+    @section  LICENSE
+
+    Software License Agreement (BSD License)
+
+    Copyright (c) 2010, microBuilder SARL
+    Copyright (c) 2021, INgo.Rah@gmx.net
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+    1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+    3. Neither the name of the copyright holders nor the
+    names of its contributors may be used to endorse or promote products
+    derived from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ''AS IS'' AND ANY
+    EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+    ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+*/
+/**************************************************************************/
+#ifdef WITH_TFT
+#include <Arduino.h>
+
+#include "st7735.h"
+
+static const unsigned char font[] PROGMEM = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x3E, 0x5B, 0x4F, 0x5B, 0x3E, 0x3E, 0x6B,
+    0x4F, 0x6B, 0x3E, 0x1C, 0x3E, 0x7C, 0x3E, 0x1C, 0x18, 0x3C, 0x7E, 0x3C,
+    0x18, 0x1C, 0x57, 0x7D, 0x57, 0x1C, 0x1C, 0x5E, 0x7F, 0x5E, 0x1C, 0x00,
+    0x18, 0x3C, 0x18, 0x00, 0xFF, 0xE7, 0xC3, 0xE7, 0xFF, 0x00, 0x18, 0x24,
+    0x18, 0x00, 0xFF, 0xE7, 0xDB, 0xE7, 0xFF, 0x30, 0x48, 0x3A, 0x06, 0x0E,
+    0x26, 0x29, 0x79, 0x29, 0x26, 0x40, 0x7F, 0x05, 0x05, 0x07, 0x40, 0x7F,
+    0x05, 0x25, 0x3F, 0x5A, 0x3C, 0xE7, 0x3C, 0x5A, 0x7F, 0x3E, 0x1C, 0x1C,
+    0x08, 0x08, 0x1C, 0x1C, 0x3E, 0x7F, 0x14, 0x22, 0x7F, 0x22, 0x14, 0x5F,
+    0x5F, 0x00, 0x5F, 0x5F, 0x06, 0x09, 0x7F, 0x01, 0x7F, 0x00, 0x66, 0x89,
+    0x95, 0x6A, 0x60, 0x60, 0x60, 0x60, 0x60, 0x94, 0xA2, 0xFF, 0xA2, 0x94,
+    0x08, 0x04, 0x7E, 0x04, 0x08, 0x10, 0x20, 0x7E, 0x20, 0x10, 0x08, 0x08,
+    0x2A, 0x1C, 0x08, 0x08, 0x1C, 0x2A, 0x08, 0x08, 0x1E, 0x10, 0x10, 0x10,
+    0x10, 0x0C, 0x1E, 0x0C, 0x1E, 0x0C, 0x30, 0x38, 0x3E, 0x38, 0x30, 0x06,
+    0x0E, 0x3E, 0x0E, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5F,
+    0x00, 0x00, 0x00, 0x07, 0x00, 0x07, 0x00, 0x14, 0x7F, 0x14, 0x7F, 0x14,
+    0x24, 0x2A, 0x7F, 0x2A, 0x12, 0x23, 0x13, 0x08, 0x64, 0x62, 0x36, 0x49,
+    0x56, 0x20, 0x50, 0x00, 0x08, 0x07, 0x03, 0x00, 0x00, 0x1C, 0x22, 0x41,
+    0x00, 0x00, 0x41, 0x22, 0x1C, 0x00, 0x2A, 0x1C, 0x7F, 0x1C, 0x2A, 0x08,
+    0x08, 0x3E, 0x08, 0x08, 0x00, 0x80, 0x70, 0x30, 0x00, 0x08, 0x08, 0x08,
+    0x08, 0x08, 0x00, 0x00, 0x60, 0x60, 0x00, 0x20, 0x10, 0x08, 0x04, 0x02,
+    0x3E, 0x51, 0x49, 0x45, 0x3E, 0x00, 0x42, 0x7F, 0x40, 0x00, 0x72, 0x49,
+    0x49, 0x49, 0x46, 0x21, 0x41, 0x49, 0x4D, 0x33, 0x18, 0x14, 0x12, 0x7F,
+    0x10, 0x27, 0x45, 0x45, 0x45, 0x39, 0x3C, 0x4A, 0x49, 0x49, 0x31, 0x41,
+    0x21, 0x11, 0x09, 0x07, 0x36, 0x49, 0x49, 0x49, 0x36, 0x46, 0x49, 0x49,
+    0x29, 0x1E, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x40, 0x34, 0x00, 0x00,
+    0x00, 0x08, 0x14, 0x22, 0x41, 0x14, 0x14, 0x14, 0x14, 0x14, 0x00, 0x41,
+    0x22, 0x14, 0x08, 0x02, 0x01, 0x59, 0x09, 0x06, 0x3E, 0x41, 0x5D, 0x59,
+    0x4E, 0x7C, 0x12, 0x11, 0x12, 0x7C, 0x7F, 0x49, 0x49, 0x49, 0x36, 0x3E,
+    0x41, 0x41, 0x41, 0x22, 0x7F, 0x41, 0x41, 0x41, 0x3E, 0x7F, 0x49, 0x49,
+    0x49, 0x41, 0x7F, 0x09, 0x09, 0x09, 0x01, 0x3E, 0x41, 0x41, 0x51, 0x73,
+    0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00, 0x41, 0x7F, 0x41, 0x00, 0x20, 0x40,
+    0x41, 0x3F, 0x01, 0x7F, 0x08, 0x14, 0x22, 0x41, 0x7F, 0x40, 0x40, 0x40,
+    0x40, 0x7F, 0x02, 0x1C, 0x02, 0x7F, 0x7F, 0x04, 0x08, 0x10, 0x7F, 0x3E,
+    0x41, 0x41, 0x41, 0x3E, 0x7F, 0x09, 0x09, 0x09, 0x06, 0x3E, 0x41, 0x51,
+    0x21, 0x5E, 0x7F, 0x09, 0x19, 0x29, 0x46, 0x26, 0x49, 0x49, 0x49, 0x32,
+    0x03, 0x01, 0x7F, 0x01, 0x03, 0x3F, 0x40, 0x40, 0x40, 0x3F, 0x1F, 0x20,
+    0x40, 0x20, 0x1F, 0x3F, 0x40, 0x38, 0x40, 0x3F, 0x63, 0x14, 0x08, 0x14,
+    0x63, 0x03, 0x04, 0x78, 0x04, 0x03, 0x61, 0x59, 0x49, 0x4D, 0x43, 0x00,
+    0x7F, 0x41, 0x41, 0x41, 0x02, 0x04, 0x08, 0x10, 0x20, 0x00, 0x41, 0x41,
+    0x41, 0x7F, 0x04, 0x02, 0x01, 0x02, 0x04, 0x40, 0x40, 0x40, 0x40, 0x40,
+    0x00, 0x03, 0x07, 0x08, 0x00, 0x20, 0x54, 0x54, 0x78, 0x40, 0x7F, 0x28,
+    0x44, 0x44, 0x38, 0x38, 0x44, 0x44, 0x44, 0x28, 0x38, 0x44, 0x44, 0x28,
+    0x7F, 0x38, 0x54, 0x54, 0x54, 0x18, 0x00, 0x08, 0x7E, 0x09, 0x02, 0x18,
+    0xA4, 0xA4, 0x9C, 0x78, 0x7F, 0x08, 0x04, 0x04, 0x78, 0x00, 0x44, 0x7D,
+    0x40, 0x00, 0x20, 0x40, 0x40, 0x3D, 0x00, 0x7F, 0x10, 0x28, 0x44, 0x00,
+    0x00, 0x41, 0x7F, 0x40, 0x00, 0x7C, 0x04, 0x78, 0x04, 0x78, 0x7C, 0x08,
+    0x04, 0x04, 0x78, 0x38, 0x44, 0x44, 0x44, 0x38, 0xFC, 0x18, 0x24, 0x24,
+    0x18, 0x18, 0x24, 0x24, 0x18, 0xFC, 0x7C, 0x08, 0x04, 0x04, 0x08, 0x48,
+    0x54, 0x54, 0x54, 0x24, 0x04, 0x04, 0x3F, 0x44, 0x24, 0x3C, 0x40, 0x40,
+    0x20, 0x7C, 0x1C, 0x20, 0x40, 0x20, 0x1C, 0x3C, 0x40, 0x30, 0x40, 0x3C,
+    0x44, 0x28, 0x10, 0x28, 0x44, 0x4C, 0x90, 0x90, 0x90, 0x7C, 0x44, 0x64,
+    0x54, 0x4C, 0x44, 0x00, 0x08, 0x36, 0x41, 0x00, 0x00, 0x00, 0x77, 0x00,
+    0x00, 0x00, 0x41, 0x36, 0x08, 0x00, 0x02, 0x01, 0x02, 0x04, 0x02, 0x3C,
+    0x26, 0x23, 0x26, 0x3C, 0x1E, 0xA1, 0xA1, 0x61, 0x12, 0x3A, 0x40, 0x40,
+    0x20, 0x7A, 0x38, 0x54, 0x54, 0x55, 0x59, 0x21, 0x55, 0x55, 0x79, 0x41,
+    0x22, 0x54, 0x54, 0x78, 0x42, // a-umlaut
+    0x21, 0x55, 0x54, 0x78, 0x40, 0x20, 0x54, 0x55, 0x79, 0x40, 0x0C, 0x1E,
+    0x52, 0x72, 0x12, 0x39, 0x55, 0x55, 0x55, 0x59, 0x39, 0x54, 0x54, 0x54,
+    0x59, 0x39, 0x55, 0x54, 0x54, 0x58, 0x00, 0x00, 0x45, 0x7C, 0x41, 0x00,
+    0x02, 0x45, 0x7D, 0x42, 0x00, 0x01, 0x45, 0x7C, 0x40, 0x7D, 0x12, 0x11,
+    0x12, 0x7D, // A-umlaut
+    0xF0, 0x28, 0x25, 0x28, 0xF0, 0x7C, 0x54, 0x55, 0x45, 0x00, 0x20, 0x54,
+    0x54, 0x7C, 0x54, 0x7C, 0x0A, 0x09, 0x7F, 0x49, 0x32, 0x49, 0x49, 0x49,
+    0x32, 0x3A, 0x44, 0x44, 0x44, 0x3A, // o-umlaut
+    0x32, 0x4A, 0x48, 0x48, 0x30, 0x3A, 0x41, 0x41, 0x21, 0x7A, 0x3A, 0x42,
+    0x40, 0x20, 0x78, 0x00, 0x9D, 0xA0, 0xA0, 0x7D, 0x3D, 0x42, 0x42, 0x42,
+    0x3D, // O-umlaut
+    0x3D, 0x40, 0x40, 0x40, 0x3D, 0x3C, 0x24, 0xFF, 0x24, 0x24, 0x48, 0x7E,
+    0x49, 0x43, 0x66, 0x2B, 0x2F, 0xFC, 0x2F, 0x2B, 0xFF, 0x09, 0x29, 0xF6,
+    0x20, 0xC0, 0x88, 0x7E, 0x09, 0x03, 0x20, 0x54, 0x54, 0x79, 0x41, 0x00,
+    0x00, 0x44, 0x7D, 0x41, 0x30, 0x48, 0x48, 0x4A, 0x32, 0x38, 0x40, 0x40,
+    0x22, 0x7A, 0x00, 0x7A, 0x0A, 0x0A, 0x72, 0x7D, 0x0D, 0x19, 0x31, 0x7D,
+    0x26, 0x29, 0x29, 0x2F, 0x28, 0x26, 0x29, 0x29, 0x29, 0x26, 0x30, 0x48,
+    0x4D, 0x40, 0x20, 0x38, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+    0x38, 0x2F, 0x10, 0xC8, 0xAC, 0xBA, 0x2F, 0x10, 0x28, 0x34, 0xFA, 0x00,
+    0x00, 0x7B, 0x00, 0x00, 0x08, 0x14, 0x2A, 0x14, 0x22, 0x22, 0x14, 0x2A,
+    0x14, 0x08, 0x55, 0x00, 0x55, 0x00, 0x55, // #176 (25% block) missing in old
+                                              // code
+    0xAA, 0x55, 0xAA, 0x55, 0xAA,             // 50% block
+    0xFF, 0x55, 0xFF, 0x55, 0xFF,             // 75% block
+    0x00, 0x00, 0x00, 0xFF, 0x00, 0x10, 0x10, 0x10, 0xFF, 0x00, 0x14, 0x14,
+    0x14, 0xFF, 0x00, 0x10, 0x10, 0xFF, 0x00, 0xFF, 0x10, 0x10, 0xF0, 0x10,
+    0xF0, 0x14, 0x14, 0x14, 0xFC, 0x00, 0x14, 0x14, 0xF7, 0x00, 0xFF, 0x00,
+    0x00, 0xFF, 0x00, 0xFF, 0x14, 0x14, 0xF4, 0x04, 0xFC, 0x14, 0x14, 0x17,
+    0x10, 0x1F, 0x10, 0x10, 0x1F, 0x10, 0x1F, 0x14, 0x14, 0x14, 0x1F, 0x00,
+    0x10, 0x10, 0x10, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x10, 0x10, 0x10,
+    0x10, 0x1F, 0x10, 0x10, 0x10, 0x10, 0xF0, 0x10, 0x00, 0x00, 0x00, 0xFF,
+    0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0xFF, 0x10, 0x00,
+    0x00, 0x00, 0xFF, 0x14, 0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0x00, 0x1F,
+    0x10, 0x17, 0x00, 0x00, 0xFC, 0x04, 0xF4, 0x14, 0x14, 0x17, 0x10, 0x17,
+    0x14, 0x14, 0xF4, 0x04, 0xF4, 0x00, 0x00, 0xFF, 0x00, 0xF7, 0x14, 0x14,
+    0x14, 0x14, 0x14, 0x14, 0x14, 0xF7, 0x00, 0xF7, 0x14, 0x14, 0x14, 0x17,
+    0x14, 0x10, 0x10, 0x1F, 0x10, 0x1F, 0x14, 0x14, 0x14, 0xF4, 0x14, 0x10,
+    0x10, 0xF0, 0x10, 0xF0, 0x00, 0x00, 0x1F, 0x10, 0x1F, 0x00, 0x00, 0x00,
+    0x1F, 0x14, 0x00, 0x00, 0x00, 0xFC, 0x14, 0x00, 0x00, 0xF0, 0x10, 0xF0,
+    0x10, 0x10, 0xFF, 0x10, 0xFF, 0x14, 0x14, 0x14, 0xFF, 0x14, 0x10, 0x10,
+    0x10, 0x1F, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x10, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xF0, 0xF0, 0xF0, 0xF0, 0xF0, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0xFF, 0xFF, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x38, 0x44, 0x44,
+    0x38, 0x44, 0xFC, 0x4A, 0x4A, 0x4A, 0x34, // sharp-s or beta
+    0x7E, 0x02, 0x02, 0x06, 0x06, 0x02, 0x7E, 0x02, 0x7E, 0x02, 0x63, 0x55,
+    0x49, 0x41, 0x63, 0x38, 0x44, 0x44, 0x3C, 0x04, 0x40, 0x7E, 0x20, 0x1E,
+    0x20, 0x06, 0x02, 0x7E, 0x02, 0x02, 0x99, 0xA5, 0xE7, 0xA5, 0x99, 0x1C,
+    0x2A, 0x49, 0x2A, 0x1C, 0x4C, 0x72, 0x01, 0x72, 0x4C, 0x30, 0x4A, 0x4D,
+    0x4D, 0x30, 0x30, 0x48, 0x78, 0x48, 0x30, 0xBC, 0x62, 0x5A, 0x46, 0x3D,
+    0x3E, 0x49, 0x49, 0x49, 0x00, 0x7E, 0x01, 0x01, 0x01, 0x7E, 0x2A, 0x2A,
+    0x2A, 0x2A, 0x2A, 0x44, 0x44, 0x5F, 0x44, 0x44, 0x40, 0x51, 0x4A, 0x44,
+    0x40, 0x40, 0x44, 0x4A, 0x51, 0x40, 0x00, 0x00, 0xFF, 0x01, 0x03, 0xE0,
+    0x80, 0xFF, 0x00, 0x00, 0x08, 0x08, 0x6B, 0x6B, 0x08, 0x36, 0x12, 0x36,
+    0x24, 0x36, 0x06, 0x0F, 0x09, 0x0F, 0x06, 0x00, 0x00, 0x18, 0x18, 0x00,
+    0x00, 0x00, 0x10, 0x10, 0x00, 0x30, 0x40, 0xFF, 0x01, 0x01, 0x00, 0x1F,
+    0x01, 0x01, 0x1E, 0x00, 0x19, 0x1D, 0x17, 0x12, 0x00, 0x3C, 0x3C, 0x3C,
+    0x3C, 0x00, 0x00, 0x00, 0x00, 0x00 // #255 NBSP
+};
+
+static lcdOrientation_t lcdOrientation = LCD_ORIENTATION_PORTRAIT;
+static lcdProperties_t st7735Properties = { 128, 160, false, false, false, true, true };
+
+/*************************************************/
+/* Private Methods                               */
+/*************************************************/
+
+void spiWrite(uint8_t d) 
+{
+  uint8_t i;
+
+  for (i = 0; i < 8; i++) { 
+    if (d & 0x80)
+      SET_SDA;   
+    else 
+      CLR_SDA; 
+    //_delay_us(1);
+    SET_SCL;
+    d <<= 1; 
+    //_delay_us(1);
+    CLR_SCL; 
+    //_delay_us(1);
+  } 
+}
+
+/*************************************************/
+void st7735WriteCmd(uint8_t command) 
+{
+  CLR_CS;
+  CLR_RS;
+  spiWrite(command);
+  SET_CS; 
+  SET_RS; 
+}
+
+/*************************************************/
+void st7735WriteData(uint8_t data)
+{
+  CLR_CS;
+  SET_RS; 
+  spiWrite(data);
+  SET_CS;
+}
+
+/*************************************************/
+void st7735SetAddrWindow(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1)
+{
+  st7735WriteCmd(ST7735_CASET);   // column addr set
+  st7735WriteData(0x00);
+  st7735WriteData(x0+2);          // XSTART 
+  st7735WriteData(0x00);
+  st7735WriteData(x1+2);          // XEND
+
+  st7735WriteCmd(ST7735_RASET);   // row addr set
+  st7735WriteData(0x00);
+  st7735WriteData(y0+1);          // YSTART
+  st7735WriteData(0x00);
+  st7735WriteData(y1+1);          // YEND
+}
+
+// SCREEN INITIALIZATION ***************************************************
+
+// Rather than a bazillion writecommand() and writedata() calls, screen
+// initialization commands and arguments are organized in these tables
+// stored in PROGMEM.  The table may look bulky, but that's mostly the
+// formatting -- storage-wise this is hundreds of bytes more compact
+// than the equivalent code.  Companion function follows.
+
+#define ST_CMD_DELAY 0x80 // special signifier for command lists
+
+// clang-format off
+static const uint8_t PROGMEM
+  Rcmd1[] = {                       // 7735R init, part 1 (red or green tab)
+    15,                             // 15 commands in list:
+    ST77XX_SWRESET,   ST_CMD_DELAY, //  1: Software reset, 0 args, w/delay
+      150,                          //     150 ms delay
+    ST77XX_SLPOUT,    ST_CMD_DELAY, //  2: Out of sleep mode, 0 args, w/delay
+      255,                          //     500 ms delay
+    ST7735_FRMCTR1, 3,              //  3: Framerate ctrl - normal mode, 3 arg:
+      0x01, 0x2C, 0x2D,             //     Rate = fosc/(1x2+40) * (LINE+2C+2D)
+    ST7735_FRMCTR2, 3,              //  4: Framerate ctrl - idle mode, 3 args:
+      0x01, 0x2C, 0x2D,             //     Rate = fosc/(1x2+40) * (LINE+2C+2D)
+    ST7735_FRMCTR3, 6,              //  5: Framerate - partial mode, 6 args:
+      0x01, 0x2C, 0x2D,             //     Dot inversion mode
+      0x01, 0x2C, 0x2D,             //     Line inversion mode
+    ST7735_INVCTR,  1,              //  6: Display inversion ctrl, 1 arg:
+      0x07,                         //     No inversion
+    ST7735_PWCTR1,  3,              //  7: Power control, 3 args, no delay:
+      0xA2,
+      0x02,                         //     -4.6V
+      0x84,                         //     AUTO mode
+    ST7735_PWCTR2,  1,              //  8: Power control, 1 arg, no delay:
+      0xC5,                         //     VGH25=2.4C VGSEL=-10 VGH=3 * AVDD
+    ST7735_PWCTR3,  2,              //  9: Power control, 2 args, no delay:
+      0x0A,                         //     Opamp current small
+      0x00,                         //     Boost frequency
+    ST7735_PWCTR4,  2,              // 10: Power control, 2 args, no delay:
+      0x8A,                         //     BCLK/2,
+      0x2A,                         //     opamp current small & medium low
+    ST7735_PWCTR5,  2,              // 11: Power control, 2 args, no delay:
+      0x8A, 0xEE,
+    ST7735_VMCTR1,  1,              // 12: Power control, 1 arg, no delay:
+      0x0E,
+    ST77XX_INVOFF,  0,              // 13: Don't invert display, no args
+    ST77XX_MADCTL,  1,              // 14: Mem access ctl (directions), 1 arg:
+      0xC8,                         //     row/col addr, bottom-top refresh
+    ST77XX_COLMOD,  1,              // 15: set color mode, 1 arg, no delay:
+      0x05 },                       //     16-bit color
+
+  Rcmd2green[] = {                  // 7735R init, part 2 (green tab only)
+    2,                              //  2 commands in list:
+    ST77XX_CASET,   4,              //  1: Column addr set, 4 args, no delay:
+      0x00, 0x02,                   //     XSTART = 0
+      0x00, 0x7F+0x02,              //     XEND = 127
+    ST77XX_RASET,   4,              //  2: Row addr set, 4 args, no delay:
+      0x00, 0x01,                   //     XSTART = 0
+      0x00, 0x9F+0x01 },            //     XEND = 159
+
+  Rcmd2green144[] = {               // 7735R init, part 2 (green 1.44 tab)
+    2,                              //  2 commands in list:
+    ST77XX_CASET,   4,              //  1: Column addr set, 4 args, no delay:
+      0x00, 0x00,                   //     XSTART = 0
+      0x00, 0x7F,                   //     XEND = 127
+    ST77XX_RASET,   4,              //  2: Row addr set, 4 args, no delay:
+      0x00, 0x00,                   //     XSTART = 0
+      0x00, 0x7F },                 //     XEND = 127
+
+  Rcmd3[] = {                       // 7735R init, part 3 (red or green tab)
+    4,                              //  4 commands in list:
+    ST7735_GMCTRP1, 16      ,       //  1: Gamma Adjustments (pos. polarity), 16 args + delay:
+      0x02, 0x1c, 0x07, 0x12,       //     (Not entirely necessary, but provides
+      0x37, 0x32, 0x29, 0x2d,       //      accurate colors)
+      0x29, 0x25, 0x2B, 0x39,
+      0x00, 0x01, 0x03, 0x10,
+    ST7735_GMCTRN1, 16      ,       //  2: Gamma Adjustments (neg. polarity), 16 args + delay:
+      0x03, 0x1d, 0x07, 0x06,       //     (Not entirely necessary, but provides
+      0x2E, 0x2C, 0x29, 0x2D,       //      accurate colors)
+      0x2E, 0x2E, 0x37, 0x3F,
+      0x00, 0x00, 0x02, 0x10,
+    ST77XX_NORON,     ST_CMD_DELAY, //  3: Normal display on, no args, w/delay
+      10,                           //     10 ms delay
+    ST77XX_DISPON,    ST_CMD_DELAY, //  4: Main screen turn on, no args w/delay
+      100 };                        //     100 ms delay
+
+void sendCommand(uint8_t commandByte, const uint8_t *dataBytes,
+                                  uint8_t numDataBytes)
+{
+  CLR_CS;
+
+  CLR_RS;          // Command mode
+  
+  spiWrite(commandByte); // Send the command byte
+
+  SET_RS;
+  for (int i = 0; i < numDataBytes; i++) {
+      spiWrite(pgm_read_byte(dataBytes)); // Send the data bytes
+      dataBytes++;
+  }
+
+  SET_CS;
+}
+
+void commonInit(const uint8_t *addr) {
+
+  uint8_t numCommands, cmd, numArgs;
+  uint16_t ms;
+
+  numCommands = pgm_read_byte(addr++); // Number of commands to follow
+  while (numCommands--) {              // For each command...
+    cmd = pgm_read_byte(addr++);       // Read command
+    numArgs = pgm_read_byte(addr++);   // Number of args to follow
+    ms = numArgs & ST_CMD_DELAY;       // If hibit set, delay follows args
+    numArgs &= ~ST_CMD_DELAY;          // Mask out delay bit
+    sendCommand(cmd, addr, numArgs);
+    addr += numArgs;
+
+    if (ms) {
+      ms = pgm_read_byte(addr++); // Read post-command delay time (ms)
+      if (ms == 255)
+        ms = 500; // If 255, delay for 500 ms
+      delay(ms);
+    }
+  }
+}
+
+void displayInit(const uint8_t *addr) {
+
+  uint8_t numCommands, cmd, numArgs;
+  uint16_t ms;
+
+  numCommands = pgm_read_byte(addr++); // Number of commands to follow
+  while (numCommands--) {              // For each command...
+    cmd = pgm_read_byte(addr++);       // Read command
+    numArgs = pgm_read_byte(addr++);   // Number of args to follow
+    ms = numArgs & ST_CMD_DELAY;       // If hibit set, delay follows args
+    numArgs &= ~ST_CMD_DELAY;          // Mask out delay bit
+    sendCommand(cmd, addr, numArgs);
+    addr += numArgs;
+
+    if (ms) {
+      ms = pgm_read_byte(addr++); // Read post-command delay time (ms)
+      if (ms == 255)
+        ms = 500; // If 255, delay for 500 ms
+      delay(ms);
+    }
+  }
+}
+
+/*************************************************/
+void st7735InitDisplay(void)
+{
+  displayInit(Rcmd1);
+  displayInit(Rcmd2green);
+  displayInit(Rcmd3);
+}
+
+/*************************************************/
+/* Public Methods                                */
+/*************************************************/
+
+/*************************************************/
+void lcdInit(void)
+{
+  // Set control pins to output
+  PORTA |= _BV(ST7735_RS_PIN) | _BV(ST7735_SDA_PIN) |
+          _BV(ST7735_SCL_PIN) | _BV(ST7735_CS_PIN);
+  DDRA |= _BV(ST7735_RS_PIN) | _BV(ST7735_SDA_PIN) |
+          _BV(ST7735_SCL_PIN) | _BV(ST7735_CS_PIN);
+
+#ifdef ST7735_BL_PIN
+  DDRA |= _BV(ST7735_BL_PIN);
+#endif
+#ifdef ST7735_RES_PIN
+  DDRA |= _BV(ST7735_RES_PIN);
+#endif
+  // Set pins low by default (except reset)
+  CLR_RS;
+  CLR_SDA;
+  CLR_SCL;
+  SET_CS;
+  CLR_BL;
+  SET_RES;
+  
+  // Turn backlight on
+  lcdBacklight(false);
+
+  // Reset display
+  CLR_RES;
+  _delay_us(50);
+  SET_RES;
+  _delay_ms(200);
+
+  // Run LCD init sequence
+  st7735InitDisplay();
+
+  // Fill black
+  lcdFillRGB(COLOR_BLACK);
+}
+
+/*************************************************/
+void lcdBacklight(uint8_t state)
+{
+  // Set the backlight
+  // Note: Depending on the type of transistor used
+  // to control the backlight, you made need to invert
+  // the values below
+  if (state)
+    // CLR_BL;
+    SET_BL;
+  else
+    // SET_BL;
+    CLR_BL;
+}
+
+/*************************************************/
+void lcdFillRGB(uint16_t color)
+{
+  uint8_t x, y;
+  st7735SetAddrWindow(0, 0, lcdGetWidth() - 1, lcdGetHeight() - 1);
+  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
+  for (x=0; x < lcdGetWidth(); x++) 
+  {
+    for (y=0; y < lcdGetHeight(); y++) 
+    {
+      st7735WriteData(color >> 8);    
+      st7735WriteData(color);    
+    }
+  }
+  st7735WriteCmd(ST7735_NOP);
+}
+
+/*************************************************/
+void lcdDrawPixel(uint16_t x, uint16_t y, uint16_t color)
+{
+  st7735SetAddrWindow(x,y,x+1,y+1);
+  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
+  st7735WriteData(color >> 8);  
+  st7735WriteData(color);
+}
+
+/**************************************************************************/
+/*! 
+    @brief  Draws an array of consecutive RGB565 pixels (much
+            faster than addressing each pixel individually)
+*/
+/**************************************************************************/
+void lcdDrawPixels(uint16_t x, uint16_t y, uint16_t *data, uint32_t len)
+{
+  // ToDo: Optimise this function ... currently only a placeholder
+  uint32_t i = 0;
+  do
+  {
+    lcdDrawPixel(x+i, y, data[i]);
+    i++;
+  } while (i<len);
+}
+
+/*************************************************/
+void lcdDrawHLine(uint16_t x0, uint16_t x1, uint16_t y, uint16_t color)
+{
+  // Allows for slightly better performance than setting individual pixels
+  uint16_t x, pixels;
+
+  if (x1 < x0)
+  {
+    // Switch x1 and x0
+    x = x1;
+    x1 = x0;
+    x0 = x;
+  }
+
+  // Check limits
+  if (x1 >= lcdGetWidth())
+  {
+    x1 = lcdGetWidth() - 1;
+  }
+  if (x0 >= lcdGetWidth())
+  {
+    x0 = lcdGetWidth() - 1;
+  }
+
+  st7735SetAddrWindow(x0, y, lcdGetWidth(), y + 1);
+  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
+  for (pixels = 0; pixels < x1 - x0 + 1; pixels++)
+  {
+    st7735WriteData(color >> 8);  
+    st7735WriteData(color);
+  }
+  st7735WriteCmd(ST7735_NOP);
+}
+
+/*************************************************/
+void lcdDrawVLine(uint16_t x, uint16_t y0, uint16_t y1, uint16_t color)
+{
+  // Allows for slightly better performance than setting individual pixels
+  uint16_t y, pixels;
+
+  if (y1 < y0)
+  {
+    // Switch y1 and y0
+    y = y1;
+    y1 = y0;
+    y0 = y;
+  }
+
+  // Check limits
+  if (y1 >= lcdGetHeight())
+  {
+    y1 = lcdGetHeight() - 1;
+  }
+  if (y0 >= lcdGetHeight())
+  {
+    y0 = lcdGetHeight() - 1;
+  }
+
+  st7735SetAddrWindow(x, y0, x, lcdGetHeight());
+  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
+  for (pixels = 0; pixels < y1 - y0 + 1; pixels++)
+  {
+    st7735WriteData(color >> 8);  
+    st7735WriteData(color);
+  }
+  st7735WriteCmd(ST7735_NOP);
+}
+
+void fillRect(int16_t x, int16_t y, int16_t w, int16_t h,
+                            uint16_t color) {
+  for (int16_t i = x; i < x + w; i++)
+    lcdDrawVLine(i, y, y + h, color);
+}
+
+// Draw a character
+/**************************************************************************/
+/*!
+   @brief   Draw a single character
+    @param    x   Bottom left corner x coordinate
+    @param    y   Bottom left corner y coordinate
+    @param    c   The 8-bit font-indexed character (likely ascii)
+    @param    color 16-bit 5-6-5 Color to draw chraracter with
+    @param    bg 16-bit 5-6-5 Color to fill background with (if same as color,
+   no background)
+    @param    size_x  Font magnification level in X-axis, 1 is 'original' size
+    @param    size_y  Font magnification level in Y-axis, 1 is 'original' size
+*/
+/**************************************************************************/
+void drawChar(int16_t x, int16_t y, unsigned char c,
+                            uint16_t color, uint16_t bg, uint8_t size_x,
+                            uint8_t size_y) {
+
+      if ((x >= st7735Properties.width) ||              // Clip right
+        (y >= st7735Properties.height) ||             // Clip bottom
+        ((x + 6 * size_x - 1) < 0) || // Clip left
+        ((y + 8 * size_y - 1) < 0))   // Clip top
+      return;
+
+    for (int8_t i = 0; i < 5; i++) { // Char bitmap = 5 columns
+      uint8_t line = pgm_read_byte(&font[c * 5 + i]);
+      for (int8_t j = 0; j < 8; j++, line >>= 1) {
+        if (line & 1) {
+          if (size_x == 1 && size_y == 1)
+            lcdDrawPixel(x + i, y + j, color);
+          else
+            fillRect(x + i * size_x, y + j * size_y, size_x, size_y,
+                          color);
+        } else if (bg != color) {
+          if (size_x == 1 && size_y == 1)
+            lcdDrawPixel(x + i, y + j, bg);
+          else
+            fillRect(x + i * size_x, y + j * size_y, size_x, size_y, bg);
+        }
+      }
+    }
+    if (bg != color) { // If opaque, draw vertical line for last column
+      if (size_x == 1 && size_y == 1)
+        lcdDrawVLine(x + 5, y, y+8, bg);
+      else
+        fillRect(x + 5 * size_x, y, size_x, 8 * size_y, bg);
+    }
+}
+
+/*************************************************/
+uint16_t lcdGetPixel(uint16_t x, uint16_t y)
+{
+  // ToDo
+  return 0;
+}
+
+/*************************************************/
+void lcdSetOrientation(lcdOrientation_t orientation)
+{
+  // ToDo
+}
+
+/*************************************************/
+lcdOrientation_t lcdGetOrientation(void)
+{
+  return lcdOrientation;
+}
+
+/*************************************************/
+uint16_t lcdGetWidth(void)
+{
+  return st7735Properties.width;
+}
+
+/*************************************************/
+uint16_t lcdGetHeight(void)
+{
+  return st7735Properties.height;
+}
+
+/*************************************************/
+void lcdScroll(int16_t pixels, uint16_t fillColor)
+{
+  // ToDo
+}
+
+/*************************************************/
+uint16_t lcdGetControllerID(void)
+{
+  return 0x7735;
+}
+
+/*************************************************/
+lcdProperties_t lcdGetProperties(void)
+{
+  return st7735Properties;
+}
+
+/*************************************************/
+void lcdTest(void)
+{
+  // Fill black
+  lcdFillRGB(COLOR_RED);
+  delay(200);
+  lcdFillRGB(COLOR_CYAN);
+  delay(200);
+  lcdFillRGB(COLOR_BLACK);
+  delay(200);
+
+  lcdDrawHLine (0, lcdGetWidth()-1, 0, COLOR_RED);
+  lcdDrawHLine (0, lcdGetWidth()-1, 1, COLOR_RED);
+
+  lcdDrawHLine (0, lcdGetWidth()-1, 11, COLOR_BLUE);
+  lcdDrawHLine (0, lcdGetWidth()-1, 12, COLOR_BLUE);
+
+  lcdDrawHLine (0, lcdGetWidth()-1, 120, COLOR_GREEN);
+  lcdDrawHLine (0, lcdGetWidth()-1, 120, COLOR_GREEN);
+
+  lcdDrawHLine (0, lcdGetWidth()-1, 60, COLOR_YELLOW);
+  lcdDrawHLine (0, lcdGetWidth()-1, 61, COLOR_YELLOW);
+
+  drawChar(10, 90, 'H', COLOR_RED, COLOR_WHITE, 1, 1);
+  drawChar(20, 90, 'i', COLOR_BLUE, COLOR_WHITE, 1, 1);
+  drawChar(40, 90, 'D', COLOR_BLUE, COLOR_WHITE, 1, 1);
+  drawChar(50, 90, 'u', COLOR_BLUE, COLOR_WHITE, 1, 1);
+  drawChar(60, 90, '!', COLOR_BLUE, COLOR_WHITE, 1, 1);
+}
+#endif
