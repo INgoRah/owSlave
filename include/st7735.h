@@ -39,7 +39,10 @@
 
 #define false 0
 #define true 1
- 
+
+#define ST7735_TFTWIDTH_128 128  // for 1.77 and mini
+#define ST7735_TFTHEIGHT_160 160 // for 1.77" and mini display
+
 // Basic Color definitions
 #define	COLOR_BLACK                         (uint16_t)(0x0000)
 #define	COLOR_BLUE                          (uint16_t)(0x001F)
@@ -88,6 +91,7 @@ typedef struct
 } lcdProperties_t;
 
 extern void     lcdInit(void);
+extern void st7735InitDisplay(void);
 extern void     lcdTest(void);
 extern uint16_t lcdGetPixel(uint16_t x, uint16_t y);
 extern void     lcdFillRGB(uint16_t data);

@@ -1,5 +1,14 @@
 # owSlave2
-Fork from https://git.smho.de/gw/?p=owSlave2.git;a=summary
+Fork from
+    https://git.smho.de/gw/?p=owSlave2.git;a=summary
+    (BSD License)
+Display code taken from
+    https://github.com/microbuilder/LPC1343CodeBase/blob/master/drivers/displays/tft/hw/st7735.c
+    (BSD License)
+and
+  https://github.com/adafruit/Adafruit-GFX-Library
+  https://github.com/adafruit/Adafruit-ST7735-Library
+  (MIT license)
 
 ## Changes
 - Interrupt generation using the ow line low for 900 us

@@ -58,7 +58,6 @@
 #ifdef DS1820_SUPPORT
 #include "DS1820.h"
 #endif
-
 #ifdef WITH_TFT
 #include "st7735.h"
 #endif
@@ -117,7 +116,6 @@ uint8_t config_info1[26];
 #define config_info config_info1
 uint8_t config_info2[26]={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0,0,0,0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
 #else
-uint8_t config_info[26];
 #endif
 /*
  * config from EEPROM
@@ -125,7 +123,7 @@ uint8_t config_info[26];
  *   cfg0 | cfg1 | cfg2 | cfg3 |cfg4 | cfg5| cfg6 | cfg7 | feature | x |
  *   maj_vers | min_vers | type
  */
-
+uint8_t config_info[26];
 uint8_t signal_cfg;
 unsigned long _ms;
 
@@ -535,7 +533,7 @@ static void reg_init(void)
 		case CFG_OUT_PWM:
 			/* default as DS2408, active low */
 			PCMSK &= ~(p);
-			PIN_DDR |= (p);
+				PIN_DDR |= (p);
 			PORT_REG |= p;
 			break;
 		case CFG_DEFAULT:
@@ -543,7 +541,7 @@ static void reg_init(void)
 			/* disable */
 			PIN_DDR &= ~(p);
 			PORT_REG &= ~(p);
-			PCMSK &= ~(p);
+				PCMSK &= ~(p);
 			break;
 		}
 	}
@@ -650,6 +648,7 @@ void setup()
 	sei();
 #ifdef WITH_TFT
 	lcdInit();
+	dispInit();
 #endif
 #ifndef AVRSIM
 	_delay_ms(100);
@@ -712,6 +711,132 @@ void temp_read()
 	PRR |= (1<<PRADC);  /*Switch off adc for save Power */
 }
 
+void printText(int x, int y, const char* s)
+{
+	int i;
+
+	for (i = 0; x < ST7735_TFTWIDTH_128 && s[i] != 0; i++) {
+		drawChar(x, y, s[i], COLOR_CYAN, COLOR_BLACK, 1, 1);
+		x += 6;
+	}
+}
+
+void dispInit()
+{
+	int x;
+
+#if 0
+	st7735InitDisplay();
+#endif
+	lcdFillRGB(COLOR_BLACK);
+	lcdDrawVLine (1, 1, 73, COLOR_GRAY_128);
+	lcdDrawVLine (126, 1, 73, COLOR_GRAY_128);
+	lcdDrawVLine (62, 1, 73, COLOR_GRAY_128);
+	lcdDrawVLine (63, 1, 73, COLOR_GRAY_200);
+	lcdDrawVLine (64, 1, 73, COLOR_GRAY_128);
+
+	lcdDrawHLine (0, 127, 36, COLOR_GRAY_128);
+	lcdDrawHLine (0, 127, 37, COLOR_GRAY_200);
+	lcdDrawHLine (0, 127, 38, COLOR_GRAY_128);
+	lcdDrawHLine (0, 127, 72, COLOR_GRAY_128);
+	lcdDrawHLine (0, 127, 73, COLOR_GRAY_200);
+	lcdDrawHLine (0, 127, 74, COLOR_GRAY_128);
+	
+	lcdDrawHLine (0, 127, 110, COLOR_GRAY_128);
+	lcdDrawHLine (0, 127, 110, COLOR_GRAY_200);
+	lcdDrawHLine (0, 127, 110, COLOR_GRAY_128);
+	printText(4, 5, "WOHNEN");
+	printText(68, 5, "BURO");
+	printText(4, 42, "ELTERN");
+	printText(68, 42, "FELINA");
+#if 0	
+	drawChar(x, 9, 'W', COLOR_CYAN, COLOR_BLACK, 1, 1);
+	x += 6;
+	drawChar(x, 9, 'O', COLOR_CYAN, COLOR_BLACK, 1, 1);
+	x += 6;
+	drawChar(x, 9, 'H', COLOR_CYAN, COLOR_BLACK, 1, 1);
+	x += 6;
+	drawChar(x, 9, 'N', COLOR_CYAN, COLOR_BLACK, 1, 1);
+#endif
+}
+
+void tftData()
+{
+	static uint8_t d_cnt = 0;
+	static uint8_t id;
+	static uint8_t cur_x = 4, y = 10;
+	static char c[6];
+	uint8_t x;
+
+	d_cnt++;
+	if (d_cnt == 1) {
+		id = pack.PIO_Output_Latch_State;
+		if (id == 0x80) {
+			d_cnt = 0;
+			dispInit();
+		}
+		return;
+	}
+
+	switch (id)
+	{
+	case 1:
+		d_cnt = 0;
+		x = 4;
+		drawChar(x, 16, '2', COLOR_GREEN, COLOR_BLACK, 2, 2);
+		x += 11;
+		drawChar(x, 16, '0', COLOR_GREEN, COLOR_BLACK, 2, 2);
+		x += 10;
+		drawChar(x, 16, '.', COLOR_GREEN, COLOR_BLACK, 2, 2);
+		x += 10;
+		drawChar(x, 16, '5', COLOR_GREEN, COLOR_BLACK, 2, 2);
+		x += 14;
+		drawChar(x, 16, 'O', COLOR_GREEN, COLOR_BLACK, 1, 1);
+		break;
+	case 2:
+		d_cnt++;
+		if (d_cnt > 6 || pack.PIO_Output_Latch_State == 0) {
+			x = 66;
+			for (int i = 0; i < (d_cnt - 2) && x < ST7735_TFTWIDTH_128 - 5; i++) {
+				if (c[i] == '.')
+					x--;
+				drawChar(x, 16, c[i], COLOR_WHITE, COLOR_GREEN, 2, 2);
+				x += 9;
+				if (c[i] == '.')
+					x--;
+			}
+			d_cnt = 0;
+		} else
+			c[d_cnt - 2] = pack.PIO_Output_Latch_State;
+		break;
+	case 3:
+		if (pack.PIO_Output_Latch_State == 0) {
+			d_cnt = 0;
+			cur_x = 4;
+			return;
+		}
+		drawChar(cur_x, 112, pack.PIO_Output_Latch_State, COLOR_BLUE, COLOR_GRAY_15, 2, 2);
+		cur_x += 10;
+		if (cur_x > 128)
+			d_cnt = 0;
+		break;
+	case 4:
+		if (d_cnt == 1) {
+			cur_x = 4;
+			y = 138;
+		}
+		drawChar(cur_x, y, pack.PIO_Output_Latch_State, COLOR_CYAN, COLOR_BLACK, 1, 1);
+		cur_x += 6;
+		if (cur_x > 128) {
+			cur_x = 4;
+			y += 10;
+		}
+		if (y > 160)
+			y = 0;
+		break;
+	}
+}
+
 void ow_loop()
 {
 #ifndef ATMEGA
@@ -736,52 +861,7 @@ void ow_loop()
 	if (gcontrol & 1) {
 		/* write, data in PIO_Output_Latch_State */
 #ifdef WITH_TFT
-		static uint8_t d_cnt = 0, id;
-		static uint8_t x = 0, y = 10;
-
-		if (d_cnt++ == 0) {
-			id = pack.PIO_Output_Latch_State;
-		} else {
-			d_cnt = 0;
-			switch (id)
-			{
-			case 1:
-				x = 4;
-				drawChar(x, 8, 'W', COLOR_CYAN, COLOR_BLACK, 1, 1);
-				x += 6;
-				drawChar(x, 8, 'O', COLOR_CYAN, COLOR_BLACK, 1, 1);
-				x += 6;
-				drawChar(x, 8, 'H', COLOR_CYAN, COLOR_BLACK, 1, 1);
-				x += 6;
-				drawChar(x, 8, 'N', COLOR_CYAN, COLOR_BLACK, 1, 1);
-				x = 4;
-				drawChar(x, 28, '2', COLOR_GREEN, COLOR_BLACK, 2, 2);
-				x += 11;
-				drawChar(x, 28, '0', COLOR_GREEN, COLOR_BLACK, 2, 2);
-				x += 11;
-				drawChar(x, 28, '.', COLOR_GREEN, COLOR_BLACK, 2, 2);
-				x += 11;
-				drawChar(x, 28, '5', COLOR_GREEN, COLOR_BLACK, 2, 2);
-				x += 11;
-				drawChar(x, 28, '°', COLOR_GREEN, COLOR_BLACK, 2, 2);
-				break;
-			case 0x80:
-				st7735InitDisplay();
-				break;
-			
-			default:
-				break;
-			}
-			drawChar(x, y, pack.PIO_Output_Latch_State, COLOR_CYAN, COLOR_BLACK, 2, 2);
-			x += 11;
-			if (x > 160) {
-				x = 0;
-				y += 10;
-			}
-			if (y > 128)
-				y = 0;
-		}
-		//st7735WriteCmd(ST77XX_DISPOFF);
+		tftData();
 #else
 		uint8_t i;
 		if (config_info[CFG_CFG_ID] == CFG_OUT_PWM) {
@@ -870,8 +950,7 @@ void ow_loop()
 			eeprom_write_block((const void*)config_info, (void*)7, CFG_VERS_ID - 1);
 #ifdef DUAL_ROM
 			eeprom_write_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), 22);
-#endif	
-		}
+#endif			}
 		sei();
 		statusPrint();
 	}

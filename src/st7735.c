@@ -164,7 +164,7 @@ static const unsigned char font[] PROGMEM = {
 };
 
 static lcdOrientation_t lcdOrientation = LCD_ORIENTATION_PORTRAIT;
-static lcdProperties_t st7735Properties = { 128, 160, false, false, false, true, true };
+static lcdProperties_t st7735Properties = { ST7735_TFTWIDTH_128, ST7735_TFTHEIGHT_160, false, false, false, true, true };
 
 /*************************************************/
 /* Private Methods                               */
@@ -179,13 +179,27 @@ void spiWrite(uint8_t d)
       SET_SDA;   
     else 
       CLR_SDA; 
-    //_delay_us(1);
     SET_SCL;
     d <<= 1; 
-    //_delay_us(1);
     CLR_SCL; 
-    //_delay_us(1);
   } 
+}
+
+void spiWriteData(uint8_t* d, uint8_t len) 
+{
+  uint8_t i, j;
+
+  for (j = 0; j < len; j++) {
+    for (i = 0; i < 8; i++) { 
+      if (d & 0x80)
+        SET_SDA;   
+      else 
+        CLR_SDA; 
+      SET_SCL;
+      d <<= 1; 
+      CLR_SCL; 
+    } 
+  }
 }
 
 /*************************************************/
@@ -211,16 +225,25 @@ void st7735WriteData(uint8_t data)
 void st7735SetAddrWindow(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1)
 {
   st7735WriteCmd(ST7735_CASET);   // column addr set
-  st7735WriteData(0x00);
-  st7735WriteData(x0+2);          // XSTART 
-  st7735WriteData(0x00);
-  st7735WriteData(x1+2);          // XEND
+  CLR_CS;
+  SET_RS; 
+
+  spiWrite(0x00);
+  spiWrite(x0+2); // XSTART 
+  spiWrite(0x00);
+  spiWrite(x1+2);// XEND
+  SET_CS;
 
   st7735WriteCmd(ST7735_RASET);   // row addr set
-  st7735WriteData(0x00);
-  st7735WriteData(y0+1);          // YSTART
-  st7735WriteData(0x00);
-  st7735WriteData(y1+1);          // YEND
+  CLR_CS;
+  SET_RS; 
+  spiWrite(0x00);
+  spiWrite(y0+1);          // YSTART
+  spiWrite(0x00);
+  spiWrite(y1+1);          // YEND
+  SET_CS;
+
+  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
 }
 
 // SCREEN INITIALIZATION ***************************************************
@@ -311,7 +334,6 @@ void sendCommand(uint8_t commandByte, const uint8_t *dataBytes,
                                   uint8_t numDataBytes)
 {
   CLR_CS;
-
   CLR_RS;          // Command mode
   
   spiWrite(commandByte); // Send the command byte
@@ -417,9 +439,6 @@ void lcdInit(void)
 
   // Run LCD init sequence
   st7735InitDisplay();
-
-  // Fill black
-  lcdFillRGB(COLOR_BLACK);
 }
 
 /*************************************************/
@@ -442,13 +461,15 @@ void lcdFillRGB(uint16_t color)
 {
   uint8_t x, y;
   st7735SetAddrWindow(0, 0, lcdGetWidth() - 1, lcdGetHeight() - 1);
-  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
   for (x=0; x < lcdGetWidth(); x++) 
   {
     for (y=0; y < lcdGetHeight(); y++) 
     {
-      st7735WriteData(color >> 8);    
-      st7735WriteData(color);    
+      CLR_CS;
+      SET_RS; 
+      spiWrite(color >> 8);    
+      spiWrite(color);    
+      SET_CS;
     }
   }
   st7735WriteCmd(ST7735_NOP);
@@ -458,9 +479,11 @@ void lcdFillRGB(uint16_t color)
 void lcdDrawPixel(uint16_t x, uint16_t y, uint16_t color)
 {
   st7735SetAddrWindow(x,y,x+1,y+1);
-  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
-  st7735WriteData(color >> 8);  
-  st7735WriteData(color);
+  CLR_CS;
+  SET_RS; 
+  spiWrite(color >> 8);    
+  spiWrite(color);    
+  SET_CS;
 }
 
 /**************************************************************************/
@@ -505,7 +528,6 @@ void lcdDrawHLine(uint16_t x0, uint16_t x1, uint16_t y, uint16_t color)
   }
 
   st7735SetAddrWindow(x0, y, lcdGetWidth(), y + 1);
-  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
   for (pixels = 0; pixels < x1 - x0 + 1; pixels++)
   {
     st7735WriteData(color >> 8);  
@@ -539,7 +561,6 @@ void lcdDrawVLine(uint16_t x, uint16_t y0, uint16_t y1, uint16_t color)
   }
 
   st7735SetAddrWindow(x, y0, x, lcdGetHeight());
-  st7735WriteCmd(ST7735_RAMWR);  // write to RAM
   for (pixels = 0; pixels < y1 - y0 + 1; pixels++)
   {
     st7735WriteData(color >> 8);  
