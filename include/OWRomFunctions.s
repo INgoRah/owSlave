@@ -30,8 +30,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
 
-
-
 .macro cjmp val,addr
 	cpi r_rwbyte,\val
 	breq \addr
@@ -50,9 +48,6 @@
 	rjmp handle_end
 1:
 .endm
-
-
-
 
 #define OW_SLEEP 0
 #define OW_READ_ROM_COMMAND 1
@@ -96,7 +91,6 @@
 	cset 0x75,OW_FWWRITECONFIG
 	cljmp 0x85,hrc_fw_configinfo
 .endm
-
 
 #ifdef _CHANGEABLE_ID_
 ; lesen der ID aus dem EEPROM beim Start
@@ -169,12 +163,9 @@ hrc_jmp_flasher_inc:
 	rjmp handle_end_sleep
 #endif
 
-
 hrc_set_searchrom:	
 	lds r_rwbyte,owid ;erstes Byte lesen
 	rjmp h_searchrom_next_bit
-
-
 
 hrc_start_read_command: ;Skip rom und Matchrom ok...
 	ldi r_mode,OW_READ_COMMAND
@@ -401,8 +392,8 @@ h_setid_set3:
 	inc r_bytep
 	rjmp handle_end
 h_setid_copy_id:
-	ldi r_temp2,lo8(E2END)
-	ldi zh,hi8(E2END)
+	ldi r_temp2,lo8(0)
+	ldi zh,hi8(0)
 	ldi r_temp,7
 	sub r_temp2,r_temp
 	;ldi r_temp,0 ;kommt nicht vor das ein E2ROM genau n*256+(0 bis 7) byte gross ist

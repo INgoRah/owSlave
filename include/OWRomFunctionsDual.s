@@ -30,8 +30,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
 
-
-
 .macro cjmp val,addr
 	cpi r_rwbyte,\val
 	breq \addr
@@ -51,27 +49,26 @@
 1:
 .endm
 
-
-
-
 #define OW_SLEEP 0
 #define OW_READ_ROM_COMMAND 1
 #define OW_MATCHROM 2
 #define OW_SEARCHROMS 3  ;next send two bit
-#define OW_SEARCHROMR 4  ; next resive master answer
+#define OW_SEARCHROMR 4  ; next receive master answer
 #define OW_READ_COMMAND1 5
 #define OW_READ_COMMAND2 6
 #define OW_READ_COMMAND12 7 ;Skip ROM.... eigentlich nicht mit mehreren geraeten, aber bei loxone schon (CC 44)
 #define OW_FWCONFIGINFO1 8
 #define OW_FWCONFIGINFO2 9
+#define OW_FWWRITECONFIG 10
+#define OW_FWWRITECONFIG2 11
 
 .comm idtable,64
 
 #ifdef _CHANGEABLE_ID_
-#define OW_WRITE_NEWID 10
-#define OW_READ_NEWID 11
-#define OW_SET_NEWID 12
-#define OW_FIRST_COMMAND 13
+#define OW_WRITE_NEWID 12
+#define OW_READ_NEWID 13
+#define OW_SET_NEWID 14
+#define OW_FIRST_COMMAND 15
 .comm newid,8
 
    
@@ -83,7 +80,7 @@
 
 
 #else
-#define OW_FIRST_COMMAND 10
+#define OW_FIRST_COMMAND 12
 #endif
 
 #ifndef _DIS_FLASH_
@@ -98,54 +95,14 @@
 #endif
 
 
-.macro FW_CONFIG_INFO1
+.macro FW_CONFIG_INFO
+	cset 0x86,OW_FWWRITECONFIG
 	cljmp 0x85,hrc_fw_configinfo1
 .endm
 .macro FW_CONFIG_INFO2
+	cset 0x86,OW_FWWRITECONFIG2
 	cljmp 0x85,hrc_fw_configinfo2
 .endm
-
-//#ifdef _CHANGEABLE_ID_ //--> ID vom EEPROM lesen auch wenn sie sich nicht ändern laesst
-; lesen der ID aus dem EEPROM beim Start
-read_EEPROM_ID1:  
-	ldi r_temp2,lo8(E2END)
-	ldi zh,hi8(E2END)
-	subi r_temp2,7
-	out _SFR_IO_ADDR(EEARH), zh
-	ldi r_bytep,0
-	ldi  zl,lo8(owid1)       
-    ldi  zh,hi8(owid1)
-	rjmp read_EEPROM_ID_loop
-read_EEPROM_ID2:  
-	ldi r_temp2,lo8(E2END)
-	ldi zh,hi8(E2END)
-	subi r_temp2,15
-	out _SFR_IO_ADDR(EEARH), zh
-	ldi r_bytep,0
-	ldi  zl,lo8(owid2)       
-    ldi  zh,hi8(owid2)
-read_EEPROM_ID_loop:
-	sbic _SFR_IO_ADDR(EECR), EEPE
-	rjmp read_EEPROM_ID_loop
-	out _SFR_IO_ADDR(EEARL),r_temp2
-	sbi _SFR_IO_ADDR(EECR), EERE
-	in r_rwbyte,_SFR_IO_ADDR(EEDR)
-	cpi r_rwbyte,0xFF
-	breq read_EEPROM_ID_end
-	st Z+,r_rwbyte
-	inc r_bytep
-	inc r_temp2
-	cpi r_bytep,8
-	brne read_EEPROM_ID_loop
-read_EEPROM_ID_end:
-	ret
-//#endif
-
-
-
-
-
-
 
 handle_stable: 
 		rjmp handle_end_no_bcount // sleep eventuell reset, nichts tun und auf Timeout warten
@@ -153,7 +110,7 @@ handle_stable:
 		rjmp h_matchrom 
 		rjmp h_searchroms 
 		rjmp h_searchromr
-		rjmp h_readcommand1 
+		rjmp h_readcommand 
 		rjmp h_readcommand2
 #ifdef _HANDLE_CC_COMMAND_
 		rjmp h_readcommand12
@@ -162,14 +119,14 @@ handle_stable:
 #endif
 		rjmp h_fwconfiginfo1
 		rjmp h_fwconfiginfo2
+		rjmp h_fwwriteconfig1
+		rjmp h_fwwriteconfig2
 #ifdef _CHANGEABLE_ID_
 		rjmp h_writeid
 		rjmp h_readid
 		rjmp h_setid
 #endif
 		COMMAND_TABLE
-
-
 
 h_readromcommand:
 	clr r_bytep
@@ -199,8 +156,6 @@ hrc_set_matchrom:
 	sts srbyte,r_temp ; Beide geraete nehmen an searchrom teil
 	ldi r_mode,OW_MATCHROM
 	rjmp handle_end
-
-
 
 hrc_set_searchrom:	
 	ldi r_temp,3
@@ -232,7 +187,8 @@ hrc_start_read_command12:
 hrc_set_alarm_search:
 	lds r_temp,alarmflag
 	tst r_temp
-	brne hrc_set_searchrom ;alarm flag nicht 0 also gehe zu searchrom
+	;alarm flag nicht 0 also gehe zu searchrom
+	brne hrc_set_searchrom_id1
 	; sonst tue nichts
 	rjmp handle_end_sleep
 
@@ -260,7 +216,6 @@ hrc_fw_configinfo2:
 ;   MATCH ROM
 ;---------------------------------------------------
 	
-
 h_matchrom:
 	lds r_bcount,srbyte
 	sbrs r_bcount,0 ;ueberspringe wenn bit 1 =0 also geraet 1 nich mehr im rennen
@@ -289,11 +244,16 @@ h_matchrom_sleep:
 	sts srbyte,r_bcount
 	rjmp handle_end_sleep
 
-
 ;---------------------------------------------------
 ;   SEARCH ROM
 ;---------------------------------------------------
 
+hrc_set_searchrom_id1:
+	ldi r_temp,1
+	; srbyte: aktuelles Byte fuer Searchrom
+	sts srbyte,r_temp ; only owid1 participates in searchrom
+	configZ idtable,r_bytep
+	rjmp h_searchrom_next_bit
 
 h_searchrom_next_bit:  ;Setup next Bit of ID
 	ld r_temp2,Z
@@ -314,8 +274,6 @@ h_searchrom_next_bit_l1:
 	ldi r_bcount,0x40 ; zwei bits sensden dann zu Searchromr 
 	ldi r_mode,OW_SEARCHROMR
 	rjmp handle_end_no_bcount
-
-
 
 h_searchroms:  ; Modus Send zwei bit
 	configZ idtable,r_bytep
@@ -460,6 +418,25 @@ h_fwconfiginfo_all:
 	rjmp handle_end_sleep
 #endif
 
+h_fwwriteconfig1:
+	configZ config_info1,r_bytep
+	st   Z,r_rwbyte
+	cpi  r_bytep,22
+	breq h_writeconfig_all
+	rjmp handle_end_inc
+
+h_fwwriteconfig2:
+	configZ config_info2,r_bytep
+	st   Z,r_rwbyte
+	cpi  r_bytep,22
+	breq h_writeconfig_all
+	rjmp handle_end_inc
+
+h_writeconfig_all:
+	ldi r_temp,16
+	sts gcontrol,r_temp
+	rjmp handle_end_sleep
+
 ;---------------------------------------------------
 ;   CHANGE ROM FUNCTIONS
 ;---------------------------------------------------
@@ -522,8 +499,8 @@ h_setid_set3:
 	inc r_bytep
 	rjmp handle_end
 h_setid_copy_id:
-	ldi r_temp2,lo8(E2END)
-	ldi zh,hi8(E2END)
+	ldi r_temp2,lo8(0)
+	ldi zh,hi8(0)
 	ldi r_temp,7
 	sbrc r_bcount,1
 	ldi r_temp,15
@@ -563,8 +540,6 @@ h_setid_EEPROM_write:
 h_setid_bad_code_all:
 	rjmp handle_end_sleep
 
-
-
 #endif
 
 
@@ -595,10 +570,6 @@ init_idtable:
 	push r_rwbyte
 	push r_idn1
 	push r_idn2
-//#ifdef _CHANGEABLE_ID_
-	rcall read_EEPROM_ID1
-	rcall read_EEPROM_ID2
-//#endif
 	ldi r_bytep,8
 	ldi r_temp,0
 	ldi  zl,lo8(idtable)
@@ -638,29 +609,6 @@ owinit_odgen2:
 	brne owinit_odgen2
 	dec r_bytep
 	brne owinit_odgen1
-	;copy ids in config bytes
-#ifndef _NO_CONFIGBYTES_
-	ldi  xl,lo8(owid1)
-	ldi  xh,hi8(owid1)
-	ldi	 yl,lo8(config_info2+17)
-	ldi  yh,hi8(config_info2+17)
-	ldi r_temp,7
-owinit_cpconfig1:
-	ld r_rwbyte,X+
-	st Y+,r_rwbyte
-	dec r_temp
-	brne owinit_cpconfig1
-	ldi  xl,lo8(owid2)
-	ldi  xh,hi8(owid2)
-	ldi	 yl,lo8(config_info1+17)
-	ldi  yh,hi8(config_info1+17)
-	ldi r_temp,7
-owinit_cpconfig2:
-	ld r_rwbyte,X+
-	st Y+,r_rwbyte
-	dec r_temp
-	brne owinit_cpconfig2
-#endif
 
 	ldi r_temp,0
 	sts mode,r_temp

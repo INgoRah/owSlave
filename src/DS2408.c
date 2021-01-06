@@ -55,6 +55,9 @@
 #endif
 
 #include "DS2408.h"
+#ifdef DS1820_SUPPORT
+#include "DS1820.h"
+#endif
 
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
@@ -71,7 +74,13 @@ void statusPrint();
 C:\Users\rah\.platformio\packages\tool-avrdude
 avrdude -C C:\Users\rah\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
 		 */
+#ifdef DUAL_ROM
+uint8_t owid1[8];
+uint8_t owid2[8];
+#define owid owid1
+#else
 uint8_t owid[8];
+#endif
 
 /* bit number in PIN register to IO mapping */
 const uint8_t pio_map [] = {
@@ -95,14 +104,24 @@ const uint8_t pio_map [] = {
 };
 
 volatile pack_t pack;
+#ifdef DS1820_SUPPORT
+volatile packt_t packt;
+#endif
 
+#ifdef DUAL_ROM
+uint8_t config_info1[26];
+#define config_info config_info1
+uint8_t config_info2[26]={0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0,0,0,0,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+#else
+uint8_t config_info[26];
+#endif
 /*
  * config from EEPROM
  * | btn | pin | pol | sw0 |  sw1 |  sw2 | sw3 | sw4 | sw5 | sw6 | sw7 |
  *   cfg0 | cfg1 | cfg2 | cfg3 |cfg4 | cfg5| cfg6 | cfg7 | feature | x |
  *   maj_vers | min_vers | type
  */
-uint8_t config_info[26];
+
 uint8_t signal_cfg;
 unsigned long _ms;
 
@@ -433,7 +452,13 @@ void var_init(void)
 	pack.PIO_Output_Latch_State = 0xff;
 	pack.FF1 = 0xFF;
 	pack.FF2 = 0xFF;
-
+#ifdef DS1820_SUPPORT
+	packt.TH = 30;
+	packt.TH = 14;
+	packt.rrFF = 0xff;
+	packt.rr00 = 0x0;
+	packt.rr10 = 0x10;
+#endif
 	alarmflag = 0;
 	btn_active = 0;
 	for (i = 0;i < MAX_BTN;i++)
@@ -506,7 +531,7 @@ static void reg_init(void)
 		case CFG_OUT_PWM:
 			/* default as DS2408, active low */
 			PCMSK &= ~(p);
-				PIN_DDR |= (p);
+			PIN_DDR |= (p);
 			PORT_REG |= p;
 			break;
 		case CFG_DEFAULT:
@@ -514,7 +539,7 @@ static void reg_init(void)
 			/* disable */
 			PIN_DDR &= ~(p);
 			PORT_REG &= ~(p);
-				PCMSK &= ~(p);
+			PCMSK &= ~(p);
 			break;
 		}
 	}
@@ -561,13 +586,17 @@ void cfg_init(void)
 		owid[4] = ~owid[2];
 		owid[7] = crc(owid, 7);
 	}
-#ifdef _CHANGEABLE_ID_
-	crc_check = eeprom_read_byte((const uint8_t*)E2END);
-	if (crc_check != 0xff)
-		eeprom_write_block((const void*)owid, (void*)E2END - 7, 8);
+#ifdef DUAL_ROM
+	for (int i = 1; i < 7; i++)
+		owid2[i] =  owid[i];
+	owid2[0] = 0x28;
+	owid2[7] = crc(owid2, 7);
 #endif
 #ifndef AVRSIM
 	eeprom_read_block((void*)&config_info, (const void*)7, CFG_TYPE_ID);
+#ifdef DUAL_ROM
+	eeprom_read_block((void*)&config_info2, (const void*)(8 + CFG_TYPE_ID), 22);
+#endif
 #endif
 	config_info[CFG_VERS_ID] = MAJ_VERSION;
 	config_info[CFG_VERS_ID + 1] = MIN_VERSION;
@@ -629,6 +658,53 @@ void setup()
 #endif
 }
 
+void temp_read()
+{
+	uint16_t temp;
+
+	wdr();
+	PRR &= ~(1<<PRADC);
+	_delay_us (20);
+	ADCSRB &= ~(1<<ACME);
+#if defined(__AVR_ATtiny85__)
+	ADMUX = _BV(REFS1) | 0xf; // ADC4 B1111
+#endif
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+	ADMUX = _BV(REFS1) | 0x22; // B00100010
+#endif
+	/* prescaler of 128 */
+	ADCSRA = (1<<ADPS2) | (1<<ADPS1) | (1<<ADPS0) | (1<<ADEN);
+	_delay_us (30);
+
+	ADCSRA |=  _BV(ADIF);  // enable ADC, turn off any pending interrupt
+	cli ();
+	set_sleep_mode (SLEEP_MODE_ADC);    // sleep during sample
+	sleep_enable();  
+	// start the conversion
+	ADCSRA |= _BV(ADSC) | _BV(ADIE);
+	sei ();
+	sleep_cpu ();
+	sleep_disable ();
+	wdr();
+	/* awake again, reading should be done, but better make sure
+	   maybe the timer interrupt fired */
+	while (bit_is_set (ADCSRA, ADSC));
+	/* Calculate the temperature in C */
+	int off = config_info2[1] | config_info2[0] << 8;
+	int k1 = (config_info2[3] | config_info2[2] << 8);
+	float k = k1 / 100 * 16;
+	k = k / 100;
+	float t = (ADC - off) * k;
+	temp = (int)t;
+	config_info2[8] = temp & 0xff;
+	config_info2[9] = (temp & 0xff00) >> 8;
+	//pack.FF1 = (uint8_t)(temp & 0xff);
+	packt.temp = temp;
+	packt.config = 0;
+	ADCSRA = 0;
+	PRR |= (1<<PRADC);  /*Switch off adc for save Power */
+}
+
 void ow_loop()
 {
 #ifndef ATMEGA
@@ -644,6 +720,12 @@ void ow_loop()
 	}
 	if (gcontrol == 0)
 		return;
+#ifdef DS1820_SUPPORT
+	if (gcontrol & 0x20) {
+		gcontrol &= ~0x20;
+		temp_read();
+	}
+#endif
 	if (gcontrol & 1) {
 		/* write, data in PIO_Output_Latch_State */
 		uint8_t i;
@@ -731,6 +813,9 @@ void ow_loop()
 			PORT_REG &= ~0x02;
 			// saving...
 			eeprom_write_block((const void*)config_info, (void*)7, CFG_VERS_ID - 1);
+#ifdef DUAL_ROM
+			eeprom_write_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), 22);
+#endif	
 		}
 		sei();
 		statusPrint();
@@ -763,7 +848,6 @@ static uint8_t auto_toggle(uint8_t i)
 	if (out == 0xff)
 		return 0;
 
-	printf ("auto sw %d -> %d (%02X)\n", i, out, pack.PIO_Output_Latch_State);
 	// toggle output
 	if (pack.PIO_Output_Latch_State & out)
 		pack.PIO_Output_Latch_State &= ~out;

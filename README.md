@@ -18,8 +18,10 @@ Fork from https://git.smho.de/gw/?p=owSlave2.git;a=summary
 [x] store new config / custom command or newid command feature
 
 ## To Do
+[ ] In case of temperature support, regularly wake up and check alarms thresholds
+[ ] Temperature controlled switch (heating control)
 [ ] Watchdog fires if switching PIO without polling/resetting alarm
-[ ] per port pin intialization to reduce power if not connected (pull up not needed)
+[x] per port pin intialization to reduce power if not connected (pull up not needed)
 [ ] regression testing signal generation and improvements (bus detection and delay)
 [ ] Disarm interrupt on reset pulse and arm again afterwards.
     Needs check wether slave can cope with just a reset without ROM commands.

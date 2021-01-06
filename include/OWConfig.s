@@ -56,9 +56,6 @@
 #define zl 30
 #define zh 31
 
-.extern owid,8
-.extern config_info,26
-
 .comm mode,1  ; Aktueller Zustand nach dem die Unterprogramme aufgerufen werden
 .comm srbyte,1 ; aktuelles Byte fuer Searchrom
 .comm bytep,1 ; pointer fuer Zugriffe auf owid usw
