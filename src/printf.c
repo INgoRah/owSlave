@@ -70,7 +70,7 @@ the executable file might be covered by the GNU General Public License. */
  Alexander Popov
  sasho@vip.orbitel.bg
 ******************************************************************************/
-
+#ifdef PRINT_SUPPORT
 /*
  * Actual printf innards.
  *
@@ -487,3 +487,4 @@ number:	if ((dprec = prec) >= 0)
 done:
 	va_end(ap);
 }
+#endif

@@ -1,37 +1,35 @@
-
 // Copyright (c) 2018, Tobias Mueller tm(at)tm3d.de
-// All rights reserved. 
-// 
-// Redistribution and use in source and binary forms, with or without 
-// modification, are permitted provided that the following conditions are 
-// met: 
-// 
-//  * Redistributions of source code must retain the above copyright 
-//    notice, this list of conditions and the following disclaimer. 
-//  * Redistributions in binary form must reproduce the above copyright 
-//    notice, this list of conditions and the following disclaimer in the 
-//    documentation and/or other materials provided with the 
-//    distribution. 
-//  * All advertising materials mentioning features or use of this 
-//    software must display the following acknowledgement: This product 
-//    includes software developed by tm3d.de and its contributors. 
-//  * Neither the name of tm3d.de nor the names of its contributors may 
-//    be used to endorse or promote products derived from this software 
-//    without specific prior written permission. 
-// 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the
+//    distribution.
+//  * All advertising materials mentioning features or use of this
+//    software must display the following acknowledgement: This product
+//    includes software developed by tm3d.de and its contributors.
+//  * Neither the name of tm3d.de nor the names of its contributors may
+//    be used to endorse or promote products derived from this software
+//    without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-//#undef _CHANGEABLE_ID_
 #define _ZERO_POLLING_
 
 #include "../include/OWConfig.s"
@@ -78,7 +76,6 @@
 #include "../include/OWRomFunctions.s"
 #endif
 #include "../include/OWTimerInterrupt.s"
-
 
 
 ; Ab hier Geraeteabhaenging
@@ -141,7 +138,7 @@ hrc_set_convertT12b:
 h_convert_run:
 	ldi r_bcount,0
 	ldi r_rwbyte,0
-	rjmp handle_end_no_bcount	
+	rjmp handle_end_no_bcount
 
 hrc_recall_eeprom1:
 	rcall hrc_recall_eeprom_func1
@@ -152,7 +149,7 @@ hrc_copy_scratchpad:
 	configZ packt,r_bytep
 	clr r_bytep
 hrc_copy_scratchpad_EEPROM_write1:
-	sbic _SFR_IO_ADDR(EECR), EEPE	
+	sbic _SFR_IO_ADDR(EECR), EEPE
 	rjmp hrc_copy_scratchpad_EEPROM_write1
 	ldi r_temp, (0<<EEPM1)|(0<<EEPM0)
 	out _SFR_IO_ADDR(EECR), r_temp
@@ -202,11 +199,12 @@ h_readscratchpad_crc:
 	lds  r_rwbyte,crc8
 h_readscratchpad_endc:
 	inc  r_bytep
-	ldi  r_bcount,1 
+	ldi  r_bcount,1
 	rjmp handle_end
 h_readscratchpad_all:
+	clr r_temp
+	sts alarmflag2,r_temp
 	rjmp handle_end_sleep
-
 
 ;---------------------------------------------------
 ;   WRITE SCRATCHPAD
@@ -302,7 +300,7 @@ h_readchanel1:
 	cpi r_bytep,31
 	brge h_readchanelcrc1
 	lds r_rwbyte,stat_to_sample
-	sts pack,r_rwbyte //sample 
+	sts pack,r_rwbyte //sample
 	rjmp handle_end_inc
 h_readchanelcrc1:
 	lds r_rwbyte,crc16
@@ -318,7 +316,7 @@ h_readchanel_crc:
 	ldi r_mode,OW_READ_CHANEL
 	lds r_rwbyte,crcsave
 	rjmp handle_end
-	
+
 h_writechanel:
 	sts crcsave,r_rwbyte
 	ldi r_mode,OW_WRITE_COMCHANEL
@@ -346,14 +344,13 @@ h_writesendchanel:
 	rjmp handle_end_sleep
 
 
-
 hrc_reset_activity:
 	clr r_temp
 	sts alarmflag,r_temp
 	sts pack+2,r_temp 	; pack.PIO_Activity_Latch_State = 0
 	sts pack+5,r_temp	; pack.Status = 0
-	;ldi r_temp,2
-	;sts gcontrol,r_temp
+	ldi r_temp,2
+	sts gcontrol,r_temp
 	ldi r_rwbyte,0xAA
 	ldi r_mode,OW_RESET_ACTIVITY
 	ldi r_sendflag,1 ;jetzt sendet der Slave zum Master
@@ -366,7 +363,7 @@ h_writeregaddr:
 	cpi r_bytep,0  ;erstes Adressbyte ?
 	brne h_writeregddr_byte1 ;nein dann weiter
 	//andi r_rwbyte,0x1F  ; nur Adressen zwischen 0 und 0x1F zulassen
-	subi r_rwbyte,0x8B  
+	subi r_rwbyte,0x8B
 	brmi h_writereg_end
 	sts addr,r_rwbyte  ;speichern des ersten bytes
 	rjmp handle_end_inc
@@ -380,16 +377,13 @@ h_writereg:
 	configZ pack+3,r_temp
 	st Z,r_rwbyte
 	cpi r_temp,5
-	brge h_writereg_end	
+	brge h_writereg_end
 	inc r_temp
 	sts addr,r_temp
 	rjmp handle_end_sleep
-		
+
 h_writereg_end:
 	rjmp handle_end_sleep
-
-
-
 
 
 #include "../include/OWPinInterrupt.s"

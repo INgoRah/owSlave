@@ -1,34 +1,34 @@
 // Copyright (c) 2017, Tobias Mueller tm(at)tm3d.de
-// All rights reserved. 
-// 
-// Redistribution and use in source and binary forms, with or without 
-// modification, are permitted provided that the following conditions are 
-// met: 
-// 
-//  * Redistributions of source code must retain the above copyright 
-//    notice, this list of conditions and the following disclaimer. 
-//  * Redistributions in binary form must reproduce the above copyright 
-//    notice, this list of conditions and the following disclaimer in the 
-//    documentation and/or other materials provided with the 
-//    distribution. 
-//  * All advertising materials mentioning features or use of this 
-//    software must display the following acknowledgement: This product 
-//    includes software developed by tm3d.de and its contributors. 
-//  * Neither the name of tm3d.de nor the names of its contributors may 
-//    be used to endorse or promote products derived from this software 
-//    without specific prior written permission. 
-// 
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS 
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT 
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR 
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT 
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT 
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, 
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY 
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE 
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//  * Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the
+//    distribution.
+//  * All advertising materials mentioning features or use of this
+//    software must display the following acknowledgement: This product
+//    includes software developed by tm3d.de and its contributors.
+//  * Neither the name of tm3d.de nor the names of its contributors may
+//    be used to endorse or promote products derived from this software
+//    without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 .macro cjmp val,addr
 	cpi r_rwbyte,\val
@@ -88,49 +88,18 @@
 #endif
 
 .macro FW_CONFIG_INFO
-	cset 0x75,OW_FWWRITECONFIG
+	cset 0x86,OW_FWWRITECONFIG
 	cljmp 0x85,hrc_fw_configinfo
 .endm
 
-#ifdef _CHANGEABLE_ID_
-; lesen der ID aus dem EEPROM beim Start
-read_EEPROM_ID:
-	push r_bytep
-	push r_rwbyte//r_temp2 and Z is not in gnu C save area
-	ldi r_temp2,lo8(E2END)
-	ldi zh,hi8(E2END)
-	subi r_temp2,7
-	out _SFR_IO_ADDR(EEARH), zh
-	ldi r_bytep,0
-	ldi  zl,lo8(owid)       
-    ldi  zh,hi8(owid)
-read_EEPROM_ID_loop:
-	sbic _SFR_IO_ADDR(EECR), EEPE
-	rjmp read_EEPROM_ID_loop
-	out _SFR_IO_ADDR(EEARL),r_temp2
-	sbi _SFR_IO_ADDR(EECR), EERE
-	in r_rwbyte,_SFR_IO_ADDR(EEDR)
-	cpi r_rwbyte,0xFF
-	breq read_EEPROM_ID_end
-	st Z+,r_rwbyte
-	inc r_bytep
-	inc r_temp2
-	cpi r_bytep,8
-	brne read_EEPROM_ID_loop
-read_EEPROM_ID_end:
-	pop r_rwbyte
-	pop r_bytep
-	ret
-#endif
-
-handle_stable: 
+handle_stable:
 		rjmp handle_end_no_bcount // sleep eventuell reset, nichts tun und auf Timeout warten
-		rjmp h_readromcommand 
-		rjmp h_matchrom 
-		rjmp h_searchroms 
+		rjmp h_readromcommand
+		rjmp h_matchrom
+		rjmp h_searchroms
 		rjmp h_searchromr
 		rjmp h_readrom
-		rjmp h_readcommand 
+		rjmp h_readcommand
 		rjmp h_fwconfiginfo
 		rjmp h_fwwriteconfig
 #ifdef _CHANGEABLE_ID_
@@ -142,12 +111,12 @@ handle_stable:
 
 h_readromcommand:
 	clr r_bytep
-	cset 0x55,OW_MATCHROM 
+	cset 0x55,OW_MATCHROM
 	cjmp 0xF0,hrc_set_searchrom
 	cjmp 0xCC,hrc_start_read_command ;skip rom
 	cjmp 0x33,hrc_set_read_rom
 	cjmp 0xEC,hrc_set_alarm_search
-	
+
 	rjmp handle_end_sleep
 
 #ifndef _DIS_FLASH_
@@ -163,7 +132,7 @@ hrc_jmp_flasher_inc:
 	rjmp handle_end_sleep
 #endif
 
-hrc_set_searchrom:	
+hrc_set_searchrom:
 	lds r_rwbyte,owid ;erstes Byte lesen
 	rjmp h_searchrom_next_bit
 
@@ -195,7 +164,7 @@ hrc_fw_configinfo:
 ;---------------------------------------------------
 ;   MATCH ROM
 ;---------------------------------------------------
-	
+
 
 h_matchrom:
 	configZ owid,r_bytep
@@ -210,7 +179,6 @@ hmr_next_byte:
 	rjmp handle_end_inc
 
 
-
 ;---------------------------------------------------
 ;   SEARCH ROM
 ;---------------------------------------------------
@@ -223,7 +191,7 @@ h_searchrom_next_bit:  ;Setup next Bit of ID
 	ror r_temp2 ; erstes unnegiertes bit in Carry
 	rol r_rwbyte ;und dann als erstes bit in r_rwbyte
 	ldi r_sendflag,1
-	ldi r_bcount,0x40 ; zwei bits sensden dann zu Searchromr 
+	ldi r_bcount,0x40 ; zwei bits sensden dann zu Searchromr
 	ldi r_mode,OW_SEARCHROMR
 	rjmp handle_end_no_bcount
 
@@ -244,13 +212,13 @@ h_searchroms:  ; Modus Send zwei bit
 	rjmp handle_end_sleep
 h_searchroms_next: ; Setup next bit
 	inc r_bytep  ; zaehler der Bits erhoehen
-	sbrc r_bytep,6 ; 64 bit erreicht 
+	sbrc r_bytep,6 ; 64 bit erreicht
 	rjmp h_searchrom_end_ok ;alles ok auf Command warten
-	mov r_temp,r_bytep 
+	mov r_temp,r_bytep
 	andi r_temp,0x07
 	brne h_searchroms_next_bit  ; bit zwischen 0 und 8
 	mov r_bcount,r_bytep  ; next Byte lesen
-	lsr r_bcount	
+	lsr r_bcount
 	lsr r_bcount
 	lsr r_bcount
 
@@ -258,7 +226,7 @@ h_searchroms_next: ; Setup next bit
 	ld r_rwbyte,Z
 	sts srbyte,r_rwbyte ;#################### Doppelung ist schon in h_searchrom_next_bit
 	rjmp h_searchrom_next_bit
-		
+
 h_searchroms_next_bit: ;next Bit lesen
 	;sts srbytep,r_bcount
 	lds r_rwbyte,srbyte
@@ -296,7 +264,7 @@ h_readrom_all:
 h_fwconfiginfo:
 	cpi  r_bytep,24
 	breq h_fwconfiginfo_crc
-#if defined(_CRC8_)  || defined( _CRC8_16_) 
+#if defined(_CRC8_)  || defined( _CRC8_16_)
 	cpi  r_bytep,25
 	breq h_fwconfiginfo_all
 #elif defined _CRC16_
@@ -380,7 +348,7 @@ h_setid:
 	brne h_setid_bad_code_all
 	cpi r_bytep,1
 	breq h_setid_set2
-	cpi r_bytep,5 
+	cpi r_bytep,5
 	breq h_setid_set3
 	cpi r_bytep,6
 	breq h_setid_copy_id
@@ -394,16 +362,12 @@ h_setid_set3:
 h_setid_copy_id:
 	ldi r_temp2,lo8(0)
 	ldi zh,hi8(0)
-	ldi r_temp,7
-	sub r_temp2,r_temp
-	;ldi r_temp,0 ;kommt nicht vor das ein E2ROM genau n*256+(0 bis 7) byte gross ist
-	;sbc zh
 	out _SFR_IO_ADDR(EEARH),zh
 	ldi zl,lo8(newid)
 	ldi zh,hi8(newid)
 	ldi r_bytep,0
 h_setid_EEPROM_write:
-	sbic _SFR_IO_ADDR(EECR), EEPE	
+	sbic _SFR_IO_ADDR(EECR), EEPE
 	rjmp h_setid_EEPROM_write
 	ldi r_temp, (0<<EEPM1)|(0<<EEPM0)
 	out _SFR_IO_ADDR(EECR), r_temp
@@ -417,7 +381,9 @@ h_setid_EEPROM_write:
 	inc r_temp2
 	cpi r_bytep,8
 	brne h_setid_EEPROM_write
-	rcall read_EEPROM_ID
+	; reset system
+	cli
+	rjmp 0
 h_setid_bad_code_all:
 	rjmp handle_end_sleep
 
@@ -438,13 +404,10 @@ spause:
 OWINIT:
 	push r_temp
 #ifndef _DIS_FLASH_
-	CHECK_BOOTLOADER_PIN 
+	CHECK_BOOTLOADER_PIN
 #endif
 	HW_INIT  //Microcontroller specific
 	CHIP_INIT //1-Wire device specific
-#ifdef _CHANGEABLE_ID_
-	rcall read_EEPROM_ID
-#endif
 	ldi r_temp,0
 	sts mode,r_temp
 	sts bcount,r_temp
