@@ -16,5 +16,6 @@ typedef union {
 
 void temp_setup();
 void temp_loop();
+void temp_read();
 
 #endif /* DS1820_H */

@@ -1,4 +1,4 @@
-/* 
+/*
 Copyright (C) 1993 Free Software Foundation
 
 This file is part of the GNU IO Library.  This library is free
@@ -94,7 +94,7 @@ void PRINT(char* buf, const char * ptr, unsigned int len) {
 			*buf++ = *ptr++;
 	}
 }
-  
+
 void PRINTP (char* buf, const char * ptr, unsigned int len) {
 	for(;len;len--) {
 		if (buf == NULL)
@@ -162,7 +162,7 @@ void _printf_P (char* dest, char const *fmt0, ...)      /* Works with string fro
 	char ox[2];			/* space for 0x hex-prefix */
 
 	va_start(ap, fmt0);
-	
+
 	fmt = fmt0;
 
 	/*
@@ -208,7 +208,7 @@ reswitch:
 			_ulong = flags&SHORTINT ? (unsigned long)(unsigned short)_d : (unsigned long)_d;
 		}
 	}
- 	
+
 #ifndef LIGHTPRINTF
 		if(ch==' ') {
 			/*
@@ -294,7 +294,7 @@ reswitch:
 				_d=va_arg(ap, int);
 				_ulong = flags&SHORTINT ? (long)(short)_d : (long)_d;
 			}
-    			
+
 			if ((long)_ulong < 0) {
 				_ulong = -_ulong;
 				sign = '-';
@@ -302,7 +302,7 @@ reswitch:
 			base = DEC;
 			goto number;
 		} else
-/*		
+/*
 		if (ch=='n') {
 			if (flags & LONGINT)
 				*va_arg(ap, long *) = ret;
@@ -310,10 +310,10 @@ reswitch:
 				*va_arg(ap, short *) = ret;
 			else
 				*va_arg(ap, int *) = ret;
-			continue;	// no output 
+			continue;	// no output
 		} else
 */
-#ifndef LIGHTPRINTF			
+#ifndef LIGHTPRINTF
 		if (ch=='O'||ch=='o') {
 			if (ch=='O')
 				flags |= LONGINT;
@@ -361,7 +361,7 @@ reswitch:
 				size = strlen(cp);
 			sign = '\0';
 		} else
-#endif /* LIGHTPRINTF */			
+#endif /* LIGHTPRINTF */
 		if(ch=='U'||ch=='u') {
 			if (ch=='U')
 				flags |= LONGINT;
@@ -405,7 +405,7 @@ number:	if ((dprec = prec) >= 0)
 					_ulong /= base;
 				} while (notlastdigit);
 #ifndef LIGHTPRINTF
-				// handle octal leading 0 
+				// handle octal leading 0
 				if (base==OCT && flags & ALT && *cp != '0')
 					*--cp = '0';
 #endif

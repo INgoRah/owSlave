@@ -7,13 +7,19 @@ double press
 [x] Owfs iDS2408 - with interrupt, with additional low time measurement or long/short/double press
 Reduce crc functions
 [x] read ID from eeprom
-[ ] store new config / custom command or newid command feature
+[x] store new config / custom command or newid command feature
 [?] test mode
 [ ] regression testing signal generation and improvements (bus detection and delay)
 [x] watchdog for long button press (or no end state after 2 secs), mode != 0 and signal not acknowledged.
+[ ] configurable timer on slave
+[ ] EEPROM protection switch
+[ ] enhanced per pin config <pin> <auto sw> <config> <timer>
+[ ] auto switch on long press (upper bits)
+[ ] detect double or even triple press
 
 ## Bugs
 [x] Initial boot up not showing in search
+[x] check config saving - maybe broken
 
 # Master
 
@@ -24,7 +30,6 @@ Reduce crc functions
 
 ### Features
 [x] Switch matrix as backup
-[ ] Timer for PIR
 [ ] Long press detection (scenes?)
 [ ] Host interface for switching and alarm reporting
 [-] separate input/output for slew rate control transistor (2n...)

@@ -28,13 +28,14 @@
 #endif
 #define PIN_DDR DDRB
 
-#define PIN_PIO0 (1<<PINB0)
-#define PIN_PIO1 (1<<PINB1)
-#define PIN_PIO2 (1<<PINB2)
-#define PIN_PIO3 (1<<PINB3)
+#define PIN_PIO0 _BV(PB0)
+#define PIN_PIO1 _BV(PB1)
+#define PIN_PIO2 _BV(PB2)
+#define PIN_PIO3 _BV(PB3)
 #define PIN_PIO4 _BV(PB4)
 #define PIN_PIO5 _BV(PB5)
 #define PIN_PIO6 _BV(PB6)
+#define PIN_PIO7 _BV(PB7)
 #define LED2 _BV(PC3)
 #define LED _BV(PC1)
 
@@ -48,13 +49,17 @@
 #ifndef MAX_BTN
 #define MAX_BTN 4
 #endif /* ifndef MAX_BTN */
-#endif
+#endif /* ATMEGA */
 
 /* All tinies */
 #if defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || \
 	defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || \
 	defined(__AVR_ATtiny84A__) || defined(__AVR_ATtiny85__)
 #define PCINT_VECTOR PCINT0_vect
+
+#if defined(BMP280_SUPPORT) && defined(WITH_LEDS)
+#error conflict with pins
+#endif
 
 #define OW_PIN PINB //1 Wire Pin as number
 #define OW_PINN PORTB2
@@ -100,10 +105,10 @@
 #define PIN_PIO5 (1<<PINA5)
 #define PIN_PIO6 (1<<PINA6)
 #define PIN_PIO7 (1<<PINA7)
+#ifdef WITH_LEDS
 #define LED _BV(PB1)
 #define LED2 _BV(PB0)
 
-#ifdef WITH_LEDS
 #define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
 #define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
 #define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
@@ -120,11 +125,12 @@
 #define SIG_ACT 1
 #define SIG_ARM 2
 
-#define MIN_VERSION 3
+#define MIN_VERSION 4
 #define MAJ_VERSION 1
 
 /** Auto switch config for each PIO
  *  0xff = default / off
+ *  range from 1 (=PIO0) .. 8 (=PIO8) otherwise invalid or deactivated
  * */
 #define CFG_SW_ID 3  /* .. 10 */
 /*
@@ -143,12 +149,16 @@
 #define CFG_ACT_LOW 3
 /** Active low with pull up */
 #define CFG_ACT_LOW_PU 4
-#define CFG_PASS 5 /** Level is passed as is, alarm on change */
-/** Level is passed with inverted logig, alarm on change */
+/** Level is passed as is, alarm on change */
+#define CFG_PASS 5
+/** Level is passed with inverted logic, alarm on change.
+ * Level 0 activates the output, level 1 deactivates it
+ */
 #define CFG_PASS_INV 6
-/** Level is passed with inverted logig, alarm on change
- *  Enables a pull up */
+/** Same as CFG_PASS_INV but enables a pull up */
 #define CFG_PASS_INV_PU 7
+/** Same as CFG_PASS but enables a pull up */
+#define CFG_PASS_PU 8
 #define CFG_BTN_MASK 0x10 /** button mask */
 /** Press button with validation and long press detection.
  * A 1 represents normal polarity (push button to ground) with
@@ -203,6 +213,9 @@ typedef union {
 		/* The data in this register represents the latest data
 		 * written to the PIO through the Channel-access Write
 		 * command 5A / reg adr 89
+		 * Active low output (default DS2408 behaviour).
+         * Set PIO to 0 = conducting, on, pin active low
+         * set 1 / non-conducting (off) / input
 		 */
 		uint8_t PIO_Output_Latch_State;
 		/*

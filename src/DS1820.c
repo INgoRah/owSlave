@@ -40,6 +40,15 @@
 #include "owSlave_tools.h"
 #include "DS2408.h"
 #include "DS1820.h"
+#ifdef BMP280_SUPPORT
+#include <i2cmaster.h>
+#endif
+#ifdef HAVE_UART
+#include "uart.h"
+#include "printf.h"
+#else
+#define printf(...)
+#endif
 
 /* must be protected by interrupts */
 #define wdt_tim_enable() do { \
@@ -50,17 +59,21 @@
 		WDTCSR |= _BV(WDIE); \
 	}while(0);
 
+/* for status update */
 extern pack_t pack;
 extern uint8_t int_signal;
 extern uint8_t config_info2[26];
 extern unsigned long _ms;
 
 volatile packt_t packt;
-volatile uint8_t do_temp;
-int16_t temp;
+volatile static uint8_t do_temp;
 int16_t last_temp;
+#ifdef BMP280_SUPPORT
+static uint8_t bmp280_found = 0;
+#else
 uint16_t adc = 0;
 uint8_t cnt = 0;
+#endif
 
 #ifdef WDT_vect
 ISR(WDT_vect)
@@ -68,11 +81,110 @@ ISR(WDT_vect)
 ISR(WATCHDOG_vect)
 #endif
 {
-	do_temp ++;
+	do_temp++;
 }
 
 // when ADC completed, take an interrupt
 EMPTY_INTERRUPT (ADC_vect);
+
+#ifdef BMP280_SUPPORT
+uint16_t dig_T1;
+int16_t dig_T2;
+int16_t dig_T3;
+
+int16_t bmp280_compensate_T16(int32_t adc_T)
+{
+	double var1, var2;
+	int32_t t_fine;
+	int16_t T;
+
+	var1 = (((double)adc_T)/16384.0 - ((double)dig_T1)/1024.0) * ((double)dig_T2);
+	var2 = ((((double)adc_T)/131072.0 - ((double)dig_T1)/8192.0) *
+	(((double)adc_T)/131072.0 - ((double) dig_T1)/8192.0)) * ((double)dig_T3);
+	t_fine = (int32_t)(var1 + var2);
+	/* original it was double without *16 ...
+	   This converts to the 1820 value */
+	T = (int16_t) (t_fine / 5120.0 * 16);
+
+	return T;
+}
+
+uint16_t bmp280_read16(uint8_t adr)
+{
+	uint8_t lsb, msb;
+
+	i2c_start(0xEC + I2C_WRITE);
+	i2c_write(adr);
+	i2c_rep_start(0xEC + I2C_READ);
+	lsb = i2c_read(ACK);
+	msb = i2c_read(NACK);
+	i2c_stop();
+
+	return msb << 8 | lsb;
+}
+
+void bmp280_calib()
+{
+	dig_T1 = bmp280_read16(0x88);
+	dig_T2 = bmp280_read16(0x8A);
+	dig_T3 = bmp280_read16(0x8C);
+	printf ("T1 = %x T2 = %x T3 = %x\n", dig_T1, dig_T2, dig_T3);
+}
+
+void bmp280_init()
+{
+	uint8_t ret;
+
+	i2c_init();
+	// set device address (EC 8 bit = 76 7 bit) and write mode
+	ret = i2c_start(0xEC + I2C_WRITE);
+	if (ret) {
+		printf ("no ack on adr (%i)\n", ret);
+		i2c_stop();
+		return;
+	}
+	ret = i2c_write(0xD0);
+	if (ret) {
+		printf ("no ack on write (%i)\n", ret);
+		i2c_stop();
+		return;
+	}
+	i2c_stop();
+	i2c_start (0xEC + I2C_READ);
+	ret = i2c_read(NACK);
+	config_info2[8] = ret;
+
+	if (ret != 0x58)
+		return;
+	i2c_start(0xEC + I2C_WRITE);
+	i2c_write(0xF4);
+	/* write mode to forced */
+	i2c_write(0x45);
+	i2c_stop();
+	bmp280_calib();
+	bmp280_found = 1;
+}
+
+int32_t bmp280_readT()
+{
+	uint8_t msb, lsb, c;
+
+	i2c_start(0xEC + I2C_WRITE);
+	i2c_write(0xF4);
+	/* write mode to forced */
+	i2c_write(0x45);
+	i2c_stop();
+	delay(1);
+	i2c_start(0xEC + I2C_WRITE);
+	i2c_write(0xFA);
+	i2c_rep_start(0xEC + I2C_READ);
+	msb = i2c_read(ACK);
+	lsb = i2c_read(ACK);
+	c = i2c_read(NACK);
+	i2c_stop();
+	return (int32_t)msb << 12 | ((int16_t)lsb << 4) | (c >> 4);
+}
+#endif
 
 void temp_setup()
 {
@@ -83,16 +195,30 @@ void temp_setup()
 	packt.rrFF = 0xff;
 	packt.rr00 = 0x0;
 	packt.rr10 = 0x10;
-	packt.config = 0;
+	/* 12 bit resolution */
+	packt.config = 0x60;
 	alarmflag2 = 0;
-	temp = 0;
+	packt.temp = 0;
 	last_temp = 0;
-	do_temp = 1;
+	/* force full update */
+	do_temp = 4;
+#ifdef BMP280_SUPPORT
+	bmp280_found = 0;
+	bmp280_init();
+	if (bmp280_found == 0)
+		pack.Status |= 0x08;
+#endif
 }
 
+/* stores the read and calculated temperature in temp */
 void temp_read()
 {
-	wdt_reset();
+#ifdef BMP280_SUPPORT
+	int32_t data = bmp280_readT();
+	packt.temp = bmp280_compensate_T16(data);
+	pack.Status |= 0x02;
+	_ms += 4;
+#else
 	PRR &= ~(1<<PRADC);
 	_delay_us (20);
 	ADCSRB &= ~(1<<ACME);
@@ -127,8 +253,9 @@ void temp_read()
 		if (cnt == 4)
 			adc = adc >> 2;
 		else
-			do_temp = 1;
+			do_temp = 4;
 	} else 	{
+		int16_t temp;
 		float k, t;
 		int off = config_info2[1] | config_info2[0] << 8;
 		int k1 = (config_info2[3] | config_info2[2] << 8);
@@ -148,69 +275,77 @@ void temp_read()
 
 	ADCSRA = 0;
 	PRR |= (1<<PRADC);  /*Switch off adc for save Power */
+	_ms++;
+#endif
 }
 
 void temp_update()
 {
-	static uint8_t upd = 0;
+	if (last_temp == 0 && packt.temp != 0)
+		last_temp = packt.temp;
+	if (last_temp == packt.temp)
+		return;
 
-	wdt_reset();
-	WDTCSR |= _BV(WDIE);
-	do_temp = 0;
-	/* not too often, every 4th watchdog wake up (4 * 8 s) is enough */
-	if (upd++ > 3 || last_temp == 0) {
-		upd = 0;
-		temp_read();
-		_ms++;
-		if (last_temp == 0 && temp != 0)
-			last_temp = temp;
-		if (last_temp != temp) {
-			uint8_t t = (uint8_t)(temp >> 4);
+	uint8_t t = (uint8_t)(packt.temp >> 4);
 
-			last_temp = temp;
-			// signal a temperature change
-			if (config_info2[4] & 0x01)
-				alarmflag2 = 1;
-			if (config_info2[5] < 9) {
-				uint8_t pin_mask = config_info2[5];
+	pack.Status |= 0x01;
+	// signal a temperature change
+	if (config_info2[4] & 0x01)
+		alarmflag2 = 1;
+	last_temp = packt.temp;
+	if (config_info2[5] < 9) {
+		uint8_t pin_mask = config_info2[5];
 
-				/* first two pios (1 & 2) are same as bitmasks,
-					no bit manipulation needed */
-				if (pin_mask > 2)
-					 pin_mask = 1 << (pin_mask - 1);
-				if (config_info2[6] != 0xff)
-					if (t < config_info2[6]) {
-						pack.PIO_Output_Latch_State &= ~(pin_mask);
-						latch_out(pin_mask);
-					}
-				/* auto switching (heating control) */
-				if (config_info2[7] != 0xff)
-					if (t > config_info2[7]) {
-						pack.PIO_Output_Latch_State |= pin_mask;
-						latch_out(pin_mask);
-					}
-				/* if switching was done, alarm it */
-				if (pack.PIO_Activity_Latch_State && !alarmflag) {
-					alarmflag = 1;
-					if (int_signal == SIG_ARM)
-						int_signal = SIG_ACT;
-				}
+		/* first two pios (1 & 2) are same as bitmasks,
+			no bit manipulation needed */
+		if (pin_mask > 2)
+				pin_mask = 1 << (pin_mask - 1);
+		if (config_info2[6] != 0xff)
+			if (t < config_info2[6]) {
+				pack.PIO_Output_Latch_State &= ~(pin_mask);
+				latch_out(pin_mask);
 			}
-#if 1
-			if (t < packt.TL || t > packt.TH)
-				alarmflag2 = 1;
-#endif
+		/* auto switching (heating control) */
+		if (config_info2[7] != 0xff)
+			if (t > config_info2[7]) {
+				pack.PIO_Output_Latch_State |= pin_mask;
+				latch_out(pin_mask);
+			}
+		/* if switching was done, alarm it */
+		if (pack.PIO_Activity_Latch_State && !alarmflag) {
+			alarmflag = 1;
+			if (int_signal == SIG_ARM)
+				int_signal = SIG_ACT;
 		}
 	}
+	if (t < packt.TL || t > packt.TH)
+		alarmflag2 = 1;
 }
 
 void temp_loop()
 {
+	static uint8_t upd = 0;
 	if (gcontrol & 0x20) {
 		gcontrol &= ~0x20;
-		temp_read();
+		wdt_reset();
+		/* got a start conversion command, force update */
+		do_temp = 1;
+		upd = 2;
 	}
-	if (do_temp > 0)
+	if (do_temp > 0) {
+		wdt_reset();
+		WDTCSR |= _BV(WDIE);
+		do_temp = 0;
+#ifdef BMP280_SUPPORT
+		if (!bmp280_found)
+			return;
+#endif
+		/* not too often, every 4th watchdog wake up (4 * 8 s) is enough */
+		if (upd++ < 2 && last_temp != 0)
+			return;
+		upd = 0;
+		temp_read();
 		temp_update();
+	}
 }
 #endif
