@@ -1,7 +1,7 @@
 #ifdef HAVE_UART
 #include <avr/io.h>
 
-#define BAUDRATE 9600
+#define BAUDRATE 19200 //9600
 
 void serial_init(void)
 {

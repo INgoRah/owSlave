@@ -9,6 +9,9 @@
 #include <avr/sleep.h>
 #include <avr/pgmspace.h>
 #include <avr/eeprom.h>
+
+#include <setjmp.h>
+
 #include "owSlave_tools.h"
 #include "Arduino.h"
 #include "pins.h"
@@ -21,6 +24,32 @@
 
 #include "DS2408.h"
 
+#define UNITY_BEGIN() UnityBegin(__FILE__)
+#define UNITY_END() UnityEnd()
+
+#define TEST_PROTECT() (setjmp(Unity.AbortFrame) == 0)
+#define TEST_ABORT() longjmp(Unity.AbortFrame, 1)
+
+#define RUN_TEST(...) UnityDefaultTestRun(RUN_TEST_FIRST(__VA_ARGS__), RUN_TEST_SECOND(__VA_ARGS__))
+#define RUN_TEST_FIRST(...) RUN_TEST_FIRST_HELPER(__VA_ARGS__, throwaway)
+#define RUN_TEST_FIRST_HELPER(first, ...) (first), #first
+#define RUN_TEST_SECOND(...) RUN_TEST_SECOND_HELPER(__VA_ARGS__, __LINE__, throwaway)
+#define RUN_TEST_SECOND_HELPER(first, second, ...) (second)
+
+#define UNITY_FAIL_AND_BAIL   { Unity.CurrentTestFailed  = 1; TEST_ABORT(); }
+#define RETURN_IF_FAIL_OR_IGNORE if (Unity.CurrentTestFailed || Unity.CurrentTestIgnored) return
+
+#define UNITY_TEST_ASSERT_EQUAL_INT(expected, actual, line, message)  UnityAssertEqualNumber((int)(expected), (int)(actual), (message), (uint16_t)(line))
+
+#define TEST_ASSERT_EQUAL(expected, actual)         UNITY_TEST_ASSERT_EQUAL_INT((expected), (actual), __LINE__, NULL)
+#define TEST_ASSERT_NOT_EQUAL(expected, actual)     UNITY_TEST_ASSERT(((expected) != (actual)), __LINE__, " Expected Not-Equal")
+
+const char PROGMEM UnityStrOk[]                            = "OK";
+const char PROGMEM UnityStrPass[]                          = "PASS";
+const char PROGMEM UnityStrFail[]                          = "FAIL";
+const char PROGMEM UnityStrIgnore[]                        = "IGNORE";
+
+extern const uint8_t pio_map [];
 extern uint8_t gcontrol;
 extern unsigned long _ms;
 extern struct pinState btn[MAX_BTN];
@@ -31,6 +60,8 @@ extern volatile pack_t pack;
 extern void latch_out(uint8_t bb);
 extern volatile uint8_t int_signal;
 extern volatile uint8_t btn_active;
+
+jmp_buf env;
 
 int ttimer;
 uint8_t sigdone;
@@ -166,6 +197,115 @@ struct tvector btnState[] = {
 #endif
 };
 
+typedef void (*UnityTestFunction)(void);
+#define UNITY_COUNTER_TYPE uint16_t
+
+struct UNITY_STORAGE_T
+{
+    const char* TestFile;
+    const char* CurrentTestName;
+    uint16_t CurrentTestLineNumber;
+	uint16_t CurrentSubTestLineNumber;
+    UNITY_COUNTER_TYPE NumberOfTests;
+    UNITY_COUNTER_TYPE TestFailures;
+    UNITY_COUNTER_TYPE TestIgnores;
+    UNITY_COUNTER_TYPE CurrentTestFailed;
+    UNITY_COUNTER_TYPE CurrentTestIgnored;
+    jmp_buf AbortFrame;
+};
+
+struct UNITY_STORAGE_T Unity;
+
+void UnityBegin(const char* filename)
+{
+    Unity.TestFile = filename;
+    Unity.CurrentTestName = NULL;
+    Unity.CurrentTestLineNumber = 0;
+    Unity.NumberOfTests = 0;
+    Unity.TestFailures = 0;
+    Unity.TestIgnores = 0;
+    Unity.CurrentTestFailed = 0;
+    Unity.CurrentTestIgnored = 0;
+}
+
+/*-----------------------------------------------*/
+int UnityEnd(void)
+{
+    printf("%i" , Unity.NumberOfTests);
+    printf("%i", Unity.TestFailures);
+    if (Unity.TestFailures == 0U)
+    {
+        printf("%s", UnityStrOk);
+    }
+    else
+    {
+        printf("%s", UnityStrFail);
+#ifdef UNITY_DIFFERENTIATE_FINAL_FAIL
+        UNITY_OUTPUT_CHAR('E'); UNITY_OUTPUT_CHAR('D');
+#endif
+    }
+    return (int)(Unity.TestFailures);
+}
+
+/*-----------------------------------------------*/
+void UnityConcludeTest(void)
+{
+    if (Unity.CurrentTestIgnored)
+    {
+        Unity.TestIgnores++;
+    }
+    else if (!Unity.CurrentTestFailed)
+    {
+        //UnityTestResultsBegin(Unity.TestFile, Unity.CurrentTestLineNumber);
+        printf("%s", UnityStrPass);
+    }
+    else
+    {
+        Unity.TestFailures++;
+    }
+
+    Unity.CurrentTestFailed = 0;
+    Unity.CurrentTestIgnored = 0;
+}
+
+void UnityDefaultTestRun(UnityTestFunction Func, const char* FuncName, const int FuncLineNum)
+{
+    Unity.CurrentTestName = FuncName;
+    Unity.CurrentTestLineNumber = (uint16_t)FuncLineNum;
+    Unity.NumberOfTests++;
+    if (TEST_PROTECT())
+    {
+        Func();
+    }
+    if (TEST_PROTECT())
+    {
+    }
+    UnityConcludeTest();
+}
+
+void UnityAssertEqualNumber(const int expected,
+                            const int actual,
+                            const char* msg,
+                            const uint16_t lineNumber)
+{
+    RETURN_IF_FAIL_OR_IGNORE;
+
+    if (expected != actual)
+    {
+		printf("%i:", lineNumber);
+		printf("%s:", Unity.CurrentTestName);
+	    Unity.CurrentSubTestLineNumber = (uint16_t)lineNumber;
+/*        UnityTestResultsFailBegin(lineNumber);
+        UnityPrint(UnityStrExpected);
+        UnityPrintNumberByStyle(expected, style);
+        UnityPrint(UnityStrWas);
+        UnityPrintNumberByStyle(actual, style);
+        UnityAddMsgIfSpecified(msg);*/
+        UNITY_FAIL_AND_BAIL;
+    }
+}
+
+#if 0
 uint8_t bitnumber(uint8_t bitmap)
 {
 	int i, res = 1;
@@ -179,6 +319,21 @@ uint8_t bitnumber(uint8_t bitmap)
 	return 0xff;
 }
 
+uint8_t mask2Pio(uint8_t bb)
+{
+	uint8_t i, mask = 1;
+
+	for (i = 0; i < sizeof(pio_map) / sizeof(pio_map[0]); i++) {
+		if (bb == mask) {
+			return pio_map[i];
+		}
+		mask = mask << 1;
+	}
+
+	return 0;
+}
+#endif
+
 uint8_t bitCount(uint8_t bitmap)
 {
 	int i, res = 0;
@@ -191,13 +346,13 @@ uint8_t bitCount(uint8_t bitmap)
 	return res;
 }
 
-// Press button on PIN_PIO0 (1<<PINB0)
+// Press button on PIN pinut
 void btnPress(const uint8_t pinut)
 {
 	btn[pinut].state = BTN_TIMER_HIGH;
 	btn[pinut].time = BTN_MINH_TIME + _ms + 1;
 	btn[pinut].hl_state = BTN_PRESS_LOW;
-	PIN_REG |= (2 ^ pinut);
+	PIN_REG |= pio_map[pinut];
 	btn_active = 1;
 	loop();
 }
@@ -260,9 +415,9 @@ int btnTest()
 		if (p->signal)
 			btn_active = 1;
 		if (p->btn)
-			PIN_REG |= 2 ^ pinut;
+			PIN_REG |= pio_map[pinut];
 		else
-			PIN_REG &= ~(2 ^ pinut);
+			PIN_REG &= ~(pio_map[pinut]);
 		sigdone = 0;
 		loop();
 		while (_ms < p->ms && btn_active)
@@ -270,13 +425,14 @@ int btnTest()
 		if (p->id) {
 			g_testId++;
 			ret = testCheck(g_testId, pinut);
-			/*if (ret != 0)
-				return -1;*/
+			if (ret != 0)
+				return -1;
 		}
 	}
 	return ret;
 }
 
+/* tests setting pins in various conditions */
 int test_pinset()
 {
 	/* pin - 1 under test which is set
@@ -347,10 +503,8 @@ int test_pinset()
 	return 0;
 }
 
-int pinSignal()
+int pinSignal(const uint8_t pinmsk)
 {
-	static const uint8_t pinut = 2; // pin under test
-
 	struct tvector pinState[] = {
 		/* ms, pin, signal, remark, id */
 		{ 0, 0, 0,"#0 unstable", 0 },
@@ -366,10 +520,10 @@ int pinSignal()
 		if (p->signal) {
 			btn_active = 1;
 			if (p->btn) {
-				PIN_REG |= (2 ^ pinut);
+				PIN_REG |= (pinmsk);
 			}
 			else {
-				PIN_REG &= ~(2 ^ pinut);
+				PIN_REG &= ~(pinmsk);
 			}
 		}
 		sigdone = 0;
@@ -381,21 +535,21 @@ int pinSignal()
 			switch (g_testId) {
 				case 1:
 					/* signaled check for correct states */
-					if ((pack.PIO_Logic_State & (2 ^ pinut)) != (2 ^ pinut))
+					if ((pack.PIO_Logic_State & (pinmsk)) != (pinmsk))
 						return -1;
-					if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) != (2 ^ pinut))
+					if ((pack.PIO_Activity_Latch_State & (pinmsk)) != (pinmsk))
 						return -1;
 					if ((alarmflag) != 1)
 						return -1;
 					if (bitCount(pack.PIO_Activity_Latch_State) > 1)
 						return -1;
-					pack.PIO_Activity_Latch_State &= ~(2 ^ pinut);
+					pack.PIO_Activity_Latch_State &= ~(pinmsk);
 					alarmflag = 0;
 					break;
 				case 2:
-					if ((pack.PIO_Logic_State & (2 ^ pinut)) != 0)
+					if ((pack.PIO_Logic_State & (pinmsk)) != 0)
 						return -1;
-					if ((pack.PIO_Activity_Latch_State & (2 ^ pinut)) == (2 ^ pinut))
+					if ((pack.PIO_Activity_Latch_State & (pinmsk)) == (pinmsk))
 						return -1;
 					if ((alarmflag) != 0)
 						return -1;
@@ -410,38 +564,189 @@ int pinSignal()
 	return 0;
 }
 
-int pinChgTest()
+/* set all pins to input button, no auto switch and
+ * init the port - called before setup()
+ */
+void basic_init()
 {
-	static const uint8_t pinut = 2; // pin under test
+	memset (&config_info[CFG_CFG_ID], CFG_BTN, 8);
+	memset (&config_info[CFG_SW], 0xFF, 8);
+
+	PIN_REG = 0xff;
+	PORT_REG = 0xff;
+	PIN_DDR = 0x0;
+}
+
+void thermo_handle(void)
+{
+	// pin masks == latch maks (accidently)
+	uint8_t th_in_msk = 0x08; // pin mask for thermostat
+	uint8_t out_msk = 0x04; // pin mask for connected auto switch
+
+	basic_init();
+	config_info[CFG_CFG_ID] = CFG_OUT_LOW; // sw 0
+	config_info[CFG_CFG_ID + 2] = CFG_OUT_LOW; // out: sw 2 -> mask b0100
+	config_info[CFG_CFG_ID + 3] = CFG_PASS_INV_PU; // in: sw 3 -> mask b1000
+	// switch PIO3 (= 0x4) automatically
+	config_info[CFG_SW_ID + 3] = 3; // sw 3 to switch out 3 (= starting from 1)
+	// our thermostat is not active -> high
+	// PIN_REG = 0xff & (~(th_in_msk));
+	setup();
+	/*
+	 * 1) Verify initial settings
+	 */
+	TEST_ASSERT_EQUAL(PORT_REG & 0x1, 0x1);
+	// output not active
+	TEST_ASSERT_EQUAL(PORT_REG & out_msk, out_msk);
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State, 0xff);
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State, 0xff);
+
+	/*
+	 * 2) Activate thermostat and auto switch ouput
+	 */
+	PIN_REG &= ~(th_in_msk); // thermo goes to low, means active
+	btn_active = 1;
+	loop();
+	// must be low:
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & th_in_msk, 0);
+	TEST_ASSERT_EQUAL(PORT_REG & out_msk, 0x0); // check auto switch
+	// and output
+	TEST_ASSERT_EQUAL(PIN_DDR & out_msk, out_msk);
+	// state should signal low for input and output
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & 0xc, 0);
+	// only in is high, output is set (= 0)
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & 0xc, th_in_msk);
+	// both pin should signal change
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & 0xc, 0xc);
+	/*
+	 * 3) Deactivate thermostat
+	 */
+	PIN_REG |= th_in_msk;
+	btn_active = 1;
+	loop();
+
+	/*
+	 * 4) Activate thermostat and force output to inactive
+	 */
+	// and output
+	//TEST_ASSERT_EQUAL(PIN_DDR & out_msk, out_msk);
+}
+
+void thermo_handle_overwrite(void)
+{
+	// pin masks == latch maks (accidently)
+	uint8_t th_in_msk = 0x08;
+	uint8_t out_msk = 0x04;
+
+	basic_init();
+	config_info[CFG_CFG_ID] = CFG_OUT_LOW;
+	config_info[CFG_CFG_ID + 2] = CFG_OUT_LOW;
+	config_info[CFG_CFG_ID + 3] = CFG_PASS_INV_PU;
+	// switch PIO3 (= 0x4) automatically
+	config_info[CFG_SW_ID + 3] = 3;
+	// our thermostat is not active -> high
+	// PIN_REG = 0xff & (~(th_in_msk));
+	setup();
+
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State, 0xff);
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State, 0xff);
+	/*
+	 * 1) Activate thermostat
+	 */
+	// this was verified in previous test
+	PIN_REG &= ~(th_in_msk); // thermo goes to low, means active
+	btn_active = 1;
+	loop();
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & out_msk, 0);
+	// state should signal low for input and output
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & (out_msk | th_in_msk), 0);
+	pack.PIO_Activity_Latch_State = 0;
+	/*
+	 * 2) Deactivate output (forced from host)
+	 */
+	pack.PIO_Output_Latch_State |= (out_msk);
+	gcontrol |= 1;
+	loop();
+	// check logic state changed
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & out_msk, out_msk); // again 1 = inactive
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & th_in_msk, 0); // still low
+	pack.PIO_Activity_Latch_State = 0;
+	/*
+	 * 3) Deactivate thermostat - no change except notification
+	 */
+	PIN_REG |= th_in_msk;
+	btn_active = 1;
+	loop();
+	// check logic state changed
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & th_in_msk, th_in_msk);
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & th_in_msk, th_in_msk);
+
+	/*
+	 * 4) Activate thermostat and auto switch ouput. Back to normal
+	 */
+	PIN_REG &= ~(th_in_msk); // thermo goes to low, means active
+	btn_active = 1;
+	loop();
+	// must be low:
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & th_in_msk, 0);
+	TEST_ASSERT_EQUAL(PORT_REG & out_msk, 0x0); // check auto switch
+	// and output
+	TEST_ASSERT_EQUAL(PIN_DDR & out_msk, out_msk);
+	// state should signal low for input and output
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & 0xc, 0);
+	// only in is high, output is set (= 0)
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & 0xc, th_in_msk);
+	// both pin should signal change
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & 0xc, 0xc);
+}
+
+/* Tests setting an output pin via PIO_Logic_State (from 1-wire)
+*/
+void pinChgTest(void)
+{
+	static const uint8_t pinut = 7; // pin under test
+	static const uint8_t pinmsk = 0x80; // pin mask under test
 
 	/* set up needs it */
 	config_info[CFG_CFG_ID] = CFG_OUT_HIGH;
-	config_info[CFG_CFG_ID + 1] = CFG_BTN;
-	config_info[CFG_CFG_ID + 2] = CFG_BTN;
-	config_info[CFG_CFG_ID + 3] = CFG_BTN;
+	config_info[CFG_CFG_ID + 1] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 2] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 3] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 4] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 5] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 6] = CFG_ACT_HIGH;
+	config_info[CFG_CFG_ID + 7] = CFG_ACT_HIGH;
 
-	// this is wrong, lets test it...
 	config_info[CFG_CFG_ID + pinut] = CFG_ACT_HIGH;
 	/* assume the pin is inactive = low because inverted pol */
-	PIN_REG = 0xff & (~(2 ^ pinut));
+	PIN_REG = 0xff & (~(pinmsk));
 	PORT_REG = 0x0;
 	setup();
+	/*
+	 * 1) Verify initial settings
+	 */
 	// must be low:
-	if ((PORT_REG & (2 ^ pinut)) != 0x0)
-		return -1;
-	if ((DDRB & (2 ^ pinut)) != 0x0)
-		return -1;
-	/*if ((pack.PIO_Logic_State & 0x1) != 0)
-		return -1;
-	*/
-	pack.PIO_Logic_State &= ~(2 ^ pinut);
-	pinSignal();
+	TEST_ASSERT_EQUAL(PORT_REG & pinmsk, 0x0);
+	// and output
+	TEST_ASSERT_EQUAL(DDRB & pinmsk, 0x0);
+	// state should signal "not set"
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State & 0x1, 0x01);
+
+	/*
+	 * mock changing pin...
+	 */
+	//  TODO: why signaling now?
+	pack.PIO_Logic_State &= ~(pinmsk);
+	pinSignal(pinmsk);
+	// should check?
+	/*
+	 * setting output via latch
+	 */
 	pack.PIO_Output_Latch_State &= ~0x2;
 	// activate port
 	latch_out(2);
 	loop();
-	pinSignal();
-	return 0;
+	pinSignal(pinmsk);
 }
 
 int switchTest()
@@ -453,6 +758,10 @@ int switchTest()
 	config_info[CFG_CFG_ID + 1] = CFG_BTN;
 	config_info[CFG_CFG_ID + 2] = CFG_OUT_HIGH;
 	config_info[CFG_CFG_ID + 3] = CFG_BTN;
+	config_info[CFG_CFG_ID + 4] = CFG_BTN;
+	config_info[CFG_CFG_ID + 5] = CFG_BTN;
+	config_info[CFG_CFG_ID + 6] = CFG_BTN;
+	config_info[CFG_CFG_ID + 7] = CFG_ACT_HIGH;
 	//  PIO0 / button switches PIO2
 	config_info[CFG_SW_ID] = 0x2; // 2 = PIO1 (1<<PINB1)
 	setup();
@@ -529,7 +838,13 @@ int main()
 {
 	int ret = 0;
 
+    UNITY_BEGIN();
 	memset (config_info, 0xff, sizeof(config_info));
+	RUN_TEST (thermo_handle);
+	RUN_TEST (thermo_handle_overwrite);
+	RUN_TEST (pinChgTest);
+
+    UNITY_END();
 	ret = switchTest();
 	if (ret != 0)
 		printf ("switchTest issue");
@@ -539,23 +854,10 @@ int main()
 	ret = test_pinset();
 	if (ret != 0)
 		printf ("test_pinset issue");
-	ret = pinChgTest();
-	if (ret != 0)
-		printf ("pinChgTest issue");
 
 	if (ret != 0)
 		printf ("issue");
+
 	return ret;
-}
-#endif
-
-#if defined(UNIT_TEST)
-int main() {
-	setup();
-    UNITY_BEGIN();
-    TEST_ASSERT_EQUAL(btn[0].state, 1);
-    UNITY_END(); // stop unit testing
-
-    while(1){}
 }
 #endif
