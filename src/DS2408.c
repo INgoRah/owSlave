@@ -77,20 +77,8 @@ void var_init(void);
 static uint8_t auto_toggle(uint8_t i);
 void statusPrint();
 
-/* last byte will be calculated, program like
-C:\Users\rah\.platformio\packages\tool-avrdude
-avrdude -C C:\Users\rah\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
-		 */
-#ifdef DUAL_ROM
-uint8_t owid1[8];
-uint8_t owid2[8];
-#define owid owid1
-#else
-uint8_t owid[8];
-#endif
-
 /* bit number in PIN register to IO mapping */
-const uint8_t pio_map [] = {
+const uint8_t pio_map [MAX_BTN] = {
 	PIN_PIO0,
 	PIN_PIO1,
 	PIN_PIO2,
@@ -105,10 +93,20 @@ const uint8_t pio_map [] = {
 	PIN_PIO6,
 #endif
 #ifdef PIN_PIO7
-	PIN_PIO7,
+	PIN_PIO7
 #endif
-	0
 };
+
+/* last byte will be calculated, program like
+avrdude -C <users path>\.platformio\packages\tool-avrdude\avrdude.conf -c stk500v2 -P COM13 -p attiny85 -U eeprom:w:0x29,0x11,0x04,0x01,0x2,0x66,0x77:m
+ */
+#ifdef DUAL_ROM
+uint8_t owid1[8];
+uint8_t owid2[8];
+#define owid owid1
+#else
+uint8_t owid[8];
+#endif
 
 #ifndef ATMEGA
 static const uint8_t pwm_tbl[16] = { 1, 2, 3, 5, 8, 13, 21, 30, 35, 40, 45, 50, 55, 60, 70, 80 };
@@ -239,12 +237,6 @@ static void sync_pins()
 #ifdef PIN_PIO7
 	pin_sync_ls(pins, PIN_PIO7, 0x80);
 #endif
-#if  defined(DUAL_ROM) && (defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__))
-	config_info2[10] = PORTA;
-	config_info2[11] = PINA;
-	config_info2[12] = DDRA;
-	config_info2[13] = PCMSK;
-#endif
 }
 
 ISR(PCINT0_vect) {
@@ -298,7 +290,8 @@ void latch_out(uint8_t bb)
 {
 	uint8_t p = 0, id;
 
-	/* code saver, but maybe slower
+	/* code saver, but maybe slower */
+#if 0
 	uint8_t i, mask = 1;
 
 	for (i = 0; i < sizeof(pio_map) / sizeof(pio_map[0]); i++) {
@@ -309,7 +302,7 @@ void latch_out(uint8_t bb)
 		}
 		mask = mask << 1;
 	}
-	*/
+#else
 	switch (bb)
 	{
 		case 0x1:
@@ -355,6 +348,7 @@ void latch_out(uint8_t bb)
 		default:
 			return;
 	}
+#endif
 	cli();
 	/* logic state = real state, output_latch state inverted! */
 	if ((pack.PIO_Logic_State & bb) !=
@@ -444,6 +438,9 @@ void reg_init(void)
 #endif
 	for (int i = 0; i < MAX_BTN; i++) {
 		p = pio_map[i];
+		if (p == 0)
+			/* there is an error in the map, for all till MAX_BTN there should be an entry */
+			continue;
 		/* check config */
 		switch (config_info[CFG_CFG_ID + i])
 		{
@@ -452,6 +449,7 @@ void reg_init(void)
 		 */
 		case CFG_BTN:
 		case CFG_SW:
+		case CFG_PASS_PU:
 		case CFG_PASS_INV_PU:
 			/* pull up */
 			PORT_REG |= p;
@@ -522,16 +520,9 @@ void reg_init(void)
 	mask = 1;
 	for (int i = 0; i < MAX_BTN; i++) {
 		/* check config and perform initial auto_switch */
-		switch (config_info[CFG_CFG_ID + i])
-		{
-				case CFG_PASS:
-				case CFG_PASS_INV:
-				case CFG_PASS_INV_PU:
-					auto_switch(i, pack.PIO_Logic_State & mask);
-					break;
-				default:
-					/* not a button and not configured */
-					break;
+		if (config_info[CFG_CFG_ID + i] >= CFG_PASS &&
+			config_info[CFG_CFG_ID + i] <= CFG_PASS_PU) {
+			auto_switch(i, pack.PIO_Logic_State & mask);
 		}
 		mask = mask << 1;
 	}
@@ -598,7 +589,7 @@ void setup()
 	/* the watchdog timer remains active even after a system reset (except a
 	 * power-on condition), using the fastest prescaler value.
 	 * It is therefore required to turn off the watchdog early
-     * during program startup */
+	 * during program startup */
 	mcusr_old = MCUSR;
 	MCUSR = 0;
 	wdt_disable();
@@ -611,12 +602,11 @@ void setup()
 #endif
 #ifdef DS1820_SUPPORT
 	pack.Status = 0x80;
-	temp_setup();
 #endif
-
 #ifdef HAVE_UART
 	serial_init();
 #endif
+
 	cfg_init();
 	var_init();
 	OWST_INIT_ALL_OFF;
@@ -625,8 +615,11 @@ void setup()
 	OWINIT();
 	reg_init();
 	sei();
+#ifdef DS1820_SUPPORT
+	temp_setup();
+#endif
 #ifndef AVRSIM
-	_delay_ms(100);
+	_delay_ms(50);
 #endif
 #ifdef WITH_LEDS
 	led_flash();
@@ -687,8 +680,9 @@ void ow_loop()
 			}
 #endif
 		} else {
-			for (i = 1; i < 0x80; i = i * 2)
-				latch_out(i);
+			for (i = 0; i < MAX_BTN; i++)
+				if (config_info[CFG_CFG_ID + i] & CFG_OUT_MASK)
+					latch_out(1 << i);
 		}
 		/* avoid signal generation and let the
 		 latch reset activate it again
@@ -728,7 +722,7 @@ void ow_loop()
 			eeprom_write_block((const void*)config_info, (void*)7, CFG_VERS_ID - 1);
 #ifdef DUAL_ROM
 			eeprom_write_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), 22);
-#endif	
+#endif
 		}
 		reg_init();
 		sei();
@@ -759,9 +753,10 @@ static uint8_t auto_toggle(uint8_t i)
 	uint8_t out;
 	out = config_info[CFG_SW_ID + i];
 
-	if (out == 0xff)
+	if (out > 8)
 		return 0;
 
+	/* return if not valid, not configured or deactivated */
 	out = 1 << (out - 1);
 	// toggle output
 	if (pack.PIO_Output_Latch_State & out)
@@ -782,7 +777,8 @@ uint8_t auto_switch(uint8_t i, uint8_t val)
 	uint8_t out;
 	out = config_info[CFG_SW_ID + i];
 
-	if (out == 0xff)
+	/* return if not valid, not configured or deactivated */
+	if (out > 8)
 		return 0;
 
 	out = 1 << (out - 1);
@@ -907,6 +903,7 @@ void pin_change_loop()
 				case CFG_ACT_HIGH:
 					/* alarm only on rising edge */
 					if (in == 1) {
+						pack.FF1 = 0xff;
 						if ((pack.PIO_Logic_State & mask) == 0)
 							act_latch(1, mask);
 					} else
@@ -914,6 +911,7 @@ void pin_change_loop()
 					break;
 				case CFG_ACT_LOW:
 					/* alarm only on falling edge, not yet verified */
+					pack.FF1 = 0xff;
 					if (in == 0)
 						act_latch(0, mask);
 					else
@@ -922,16 +920,18 @@ void pin_change_loop()
 				case CFG_PASS:
 				case CFG_PASS_INV:
 				case CFG_PASS_INV_PU:
-					// or pin_sync_ls(in, in, mask);
-					if (auto_switch(i, in) == 0) {
-						/* no auto switch defined, just report */
+					// latch only on change!
+					if ((in && (pack.PIO_Logic_State & mask) == 0) ||
+					    (!in && (pack.PIO_Logic_State & mask) != 0)) {
+						pack.FF1 = 0xff;
 						act_latch(in, mask);
-					} else {
-						/* in case of auto_switch, logic state must be set */
-						if (in)
-							pack.PIO_Logic_State |= mask;
-						else
-							pack.PIO_Logic_State &= ~mask;
+						if (auto_switch(i, in) != 0) {
+							/* in case of auto_switch, logic state must be set */
+							if (in)
+								pack.PIO_Logic_State |= mask;
+							else
+								pack.PIO_Logic_State &= ~mask;
+						}
 					}
 					break;
 				default:
@@ -943,12 +943,13 @@ void pin_change_loop()
 	}
 	if (pack.PIO_Activity_Latch_State && !alarmflag) {
 		alarmflag = 1;
+		pack.Status |= 0x10;
 		/* TODO: check whether to alarm or not */
 		if ((pack.PIO_Activity_Latch_State & signal_cfg) && int_signal == SIG_ARM)
 			int_signal = SIG_ACT;
 	}
 	if (act_btns != 0)
-		btn_active = (act_btns << 1);
+		btn_active = act_btns;
 #ifdef DEBUG
 	if (stPrints-- == 0) {
 		statusPrint();
@@ -960,12 +961,12 @@ void loop()
 {
 	ow_loop();
 
-#ifdef DS1820_SUPPORT
-	temp_loop();
-#endif
 	/* ongoing OW access (in interrupt), serve data with high prio and skip others */
 	if (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0))
 		return;
+#ifdef DS1820_SUPPORT
+	temp_loop();
+#endif
 	if (btn_active)
 		pin_change_loop();
 	if (int_signal == SIG_ACT)
@@ -975,10 +976,7 @@ void loop()
 		sei();
 		if (TCCR1 != 0)
 			wdr();
-#ifndef AVRSIM
-		_delay_ms(1);
-#endif
-		_ms++;
+		delay(1);
 	}
 	else {
 #if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)

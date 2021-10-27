@@ -46,7 +46,7 @@
 .comm cpsp,1 ; Copy Scratchpad marker
 #endif
 
-.macro CHIP_INIT 	
+.macro CHIP_INIT
 .endm
 
 .macro COMMAND_TABLE
@@ -92,9 +92,11 @@
 #define OW_RESET_ACTIVITY OW_FIRST_COMMAND+10
 #define OW_WRITE_REG_ADDR OW_FIRST_COMMAND+11
 #define OW_WRITE_REG OW_FIRST_COMMAND+12
+#ifdef DS1820_SUPPORT
 #define OW_READ_SCRATCHPAD OW_FIRST_COMMAND+13
 #define OW_WRITE_SCRATCHPAD OW_FIRST_COMMAND+14
 #define OW_CONVERT_RUN OW_FIRST_COMMAND+15
+#endif
 
 ;---------------------------------------------------
 ;	READ COMMAND and start operation
@@ -223,7 +225,11 @@ h_writescratchpad_all:
 	rjmp handle_end_sleep
 
 #endif
+; end of DS1820_SUPPORT
 
+;---------------------------------------------------
+;   DS2408 instance 1
+;---------------------------------------------------
 h_readcommand:
 	clr r_bytep
 #ifndef _DIS_FLASH_
