@@ -7,7 +7,9 @@ https://github.com/alx741/avr_i2c.git
 License GPL v3
 ## Changes
 
-Version 1.5, 2021-08-13
+Version 1.5, 2021-11-28
+- Temperature and Humidity support with DHT22 on pin PB0 (compile option)
+  Humiditiy is reported in the byte #5 instead of FF
 
 Version 1.4, 2021-10-27
 - support BMP280 with dual rom with DS1820 on a soft I2C master
@@ -74,7 +76,7 @@ Version 1.1
   ### Configuration Definition
   SWx  [3..10]
     Auto switch an ouput on (short) press of this pin. Output starts with 1 (1 switches PIO0...).
-    0x80 disables it, 
+    0x80 disables it,
     0x10 - 0x20 are reserved for future double and tripple press
     0x40 reserved for timer based switching
   CFGx [11..18]
