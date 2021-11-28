@@ -290,8 +290,10 @@ void latch_out(uint8_t bb)
 {
 	uint8_t p = 0, id;
 
-	/* code saver, but maybe slower */
 #if 0
+	/* code saver, but maybe slower
+	 * saves 100 bytes of code
+	 */
 	uint8_t i, mask = 1;
 
 	for (i = 0; i < sizeof(pio_map) / sizeof(pio_map[0]); i++) {

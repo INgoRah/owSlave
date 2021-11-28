@@ -7,8 +7,12 @@ https://github.com/alx741/avr_i2c.git
 License GPL v3
 ## Changes
 
-Version 1.4, 2021-08-13
+Version 1.5, 2021-08-13
+
+Version 1.4, 2021-10-27
+- support BMP280 with dual rom with DS1820 on a soft I2C master
 - report any latch change even for auto switch
+- remove latch output on configured input pins
 
 Version 1.3, 2021-01-14
 - Split the files for 2408 and 1820
@@ -63,12 +67,16 @@ Version 1.1
   ## Configuration
 
   ### EEPROM Layout
-  | OW ID                         |           | Auto Switch Configuration     | PIN configuration                      |    |    | Version      | Temperature
-  |Typ| ID|Bus|~ID|~BS| 66| 77|CRC|   RES     |SW0|SW1|SW2|SW3|SW4|SW5|SW6|SW7|CFG   1    2    3    4    5    6     7  |FEA |R   |MAJ |MIN |TYP |OFF      | FACT
-  | 29|   |   |   |   |   |   |   |   |   |   |   |
+  | OW ID                     |           | Auto Switch Configuration     | PIN configuration                      |    |    | Version      | Temperature
+  |Typ| ID|Bus|~ID|~BS| 66| 77|   RES     |SW0|SW1|SW2|SW3|SW4|SW5|SW6|SW7|CFG   1    2    3    4    5    6     7  |FEA |R   |MAJ |MIN |TYP |OFF      | FACT
+  | 29|   |   |   |   |   |   |   |   |   |   |
 
   ### Configuration Definition
   SWx  [3..10]
+    Auto switch an ouput on (short) press of this pin. Output starts with 1 (1 switches PIO0...).
+    0x80 disables it, 
+    0x10 - 0x20 are reserved for future double and tripple press
+    0x40 reserved for timer based switching
   CFGx [11..18]
   FEA [19] - Feature
   Reserved [20]
