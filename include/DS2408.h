@@ -28,8 +28,8 @@
 #endif
 #define PIN_DDR DDRB
 
-#define PIN_PIO0 _BV(PB0)
-#define PIN_PIO1 _BV(PB1)
+#define PIN_PIO0 _BV(PB1)
+#define PIN_PIO1 _BV(PB0)
 #define PIN_PIO2 _BV(PB2)
 #define PIN_PIO3 _BV(PB3)
 #define PIN_PIO4 _BV(PB4)
@@ -84,7 +84,7 @@
 #define	LED2_OFF() do { }while(0)
 #endif
 #ifndef MAX_BTN
-#define MAX_BTN 2
+#define MAX_BTN 4
 #endif
 #endif
 

@@ -81,8 +81,12 @@ void statusPrint();
 const uint8_t pio_map [MAX_BTN] = {
 	PIN_PIO0,
 	PIN_PIO1,
+#ifdef PIN_PIO2
 	PIN_PIO2,
+#endif
+#ifdef PIN_PIO3
 	PIN_PIO3,
+#endif
 #ifdef PIN_PIO4
 	PIN_PIO4,
 #endif
@@ -109,7 +113,14 @@ uint8_t owid[8];
 #endif
 
 #ifndef ATMEGA
-static const uint8_t pwm_tbl[16] = { 1, 2, 3, 5, 8, 13, 21, 30, 35, 40, 45, 50, 55, 60, 70, 80 };
+#define PWM_STAGES 63
+#if 0
+static const uint8_t pwm_tbl[PWM_STAGES] = {
+	1,   2,   3,   5,   8,   13,  21,  34,
+	55,  76,  90,  100, 110, 120, 130, 140,
+	150, 160, 170, 180, 190, 200, 205, 210,
+	215, 220, 225, 230, 235, 240, 245, 250 };
+#endif
 #endif
 
 volatile pack_t pack;
@@ -200,14 +211,6 @@ static inline void act_latch(uint8_t p, uint8_t mask)
 		pack.PIO_Logic_State &= ~mask;
 }
 
-static inline void pin_sync_ls(uint8_t pins, uint8_t p, uint8_t mask)
-{
-	if (pins & p)
-		pack.PIO_Logic_State |= mask;
-	else
-		pack.PIO_Logic_State &= ~mask;
-}
-
 static inline void latch_state(uint8_t mask)
 {
 	if ((mask & pack.Conditional_Search_Channel_Selection_Mask) == 0)
@@ -221,22 +224,29 @@ static void sync_pins()
 	uint8_t pins;
 
 	pins = PIN_REG;
-	pin_sync_ls(pins, PIN_PIO0, 0x1);
-	pin_sync_ls(pins, PIN_PIO1, 0x2);
-	pin_sync_ls(pins, PIN_PIO2, 0x4);
-	pin_sync_ls(pins, PIN_PIO3, 0x8);
-#ifdef PIN_PIO4
-	pin_sync_ls(pins, PIN_PIO4, 0x10);
-#endif
-#ifdef PIN_PIO5
-	pin_sync_ls(pins, PIN_PIO5, 0x20);
-#endif
-#ifdef PIN_PIO6
-	pin_sync_ls(pins, PIN_PIO6, 0x40);
-#endif
-#ifdef PIN_PIO7
-	pin_sync_ls(pins, PIN_PIO7, 0x80);
-#endif
+	uint8_t i, mask = 1;
+
+	for (i = 0; i < sizeof(pio_map) / sizeof(pio_map[0]); i++) {
+		uint8_t p = pio_map[i];
+		if (p != 0) {
+			switch (config_info[CFG_CFG_ID + i])
+			{
+				default:
+					if (pins & p)
+						pack.PIO_Logic_State |= mask;
+					else
+						pack.PIO_Logic_State &= ~mask;
+					break;
+				case CFG_OUT_HIGH:
+					if (pins & p)
+						pack.PIO_Logic_State &= ~mask;
+					else
+						pack.PIO_Logic_State |= mask;
+					break;
+			}
+		}
+		mask = mask << 1;
+	}
 }
 
 ISR(PCINT0_vect) {
@@ -300,7 +310,6 @@ void latch_out(uint8_t bb)
 		if (bb == mask) {
 			p = pio_map[i];
 			id = i;
-			break;
 		}
 		mask = mask << 1;
 	}
@@ -488,6 +497,12 @@ void reg_init(void)
 		case CFG_OUT_PWM:
 			PCMSK &= ~(p);
 			PIN_DDR |= (p);
+#if defined(__AVR_ATtiny85__)
+			TCNT1 = PWM_STAGES + 1;
+			OCR1C = PWM_STAGES + 1;
+			// PWM-Mode, OC1B (PB4) cleared on compare match, set when TCNT1 = OCR1C
+			GTCCR = _BV(PWM1B) | _BV(COM1B0);
+#endif
 			break;
 		case CFG_DEFAULT:
 		default:
@@ -530,6 +545,11 @@ void reg_init(void)
 	}
 }
 
+/*
+  0  | 1 | 2 | 3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32
+                               0  | 1 |2 |3   4   5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32
+| 29  ID  bus  ~   ~   66  77 |CRC| RES  |SW  1   2  3  4  5  6   7  |CFG 1   2   3   4   5   6   7  |FEA |R  |MAJ|MIN|TYP|OFF    | FACT
+*/
 void cfg_init(void)
 {
 #ifndef AVRSIM
@@ -538,9 +558,9 @@ void cfg_init(void)
 	/* let power stabalize */
 	/*_delay_ms(20); */
 	while (!eeprom_is_ready() && to--)
-		_delay_ms(1);
+		_delay_ms(2);
 
-	eeprom_read_block((void*)owid, (const void*)0, 7);
+	eeprom_read_block((void*)owid, (const void*)0, 8);
 #endif
 	if (owid[0] != 0x29 || (owid[3] != ~owid[1])) {
 		owid[0] = 0x29;
@@ -573,13 +593,16 @@ void cfg_init(void)
 	config_info[CFG_TYPE_ID] = 2;
 #endif
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
-	if (config_info[CFG_TYPE_ID] == 0xff)
+	if (config_info[CFG_TYPE_ID] == 0xff) {
 #ifdef DS1820_SUPPORT
 		config_info[CFG_TYPE_ID] = 11;
 #else
 		/* default new version */
 		config_info[CFG_TYPE_ID] = 1;
+		config_info[1] = 0xDE;
+		config_info[2] = 0xAD;
 #endif
+	}
 #endif
 }
 
@@ -605,6 +628,10 @@ void setup()
 #ifdef DS1820_SUPPORT
 	pack.Status = 0x80;
 #endif
+#ifndef AVRSIM
+	/* let the power supply get stable */
+	_delay_ms(100);
+#endif
 #ifdef HAVE_UART
 	serial_init();
 #endif
@@ -616,6 +643,7 @@ void setup()
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 	reg_init();
+
 	sei();
 #ifdef DS1820_SUPPORT
 	temp_setup();
@@ -649,17 +677,15 @@ void ow_loop()
 #if PIN_PIO0 !=_BV(PB4)
 #error Not supported!
 #endif
-			if (pack.PIO_Output_Latch_State & 0x01) {
+			if (pack.PIO_Output_Latch_State & 0xfC) {
+				uint8_t i = (pack.PIO_Output_Latch_State & 0xfC) >> 2;
 				/* wake up timer */
 				PRR &= ~_BV(PRTIM1);
 				_delay_us(10);
-				TCNT1 = pwm_tbl[15] + 1; // maybe not needed ...
+				//TCNT1 = PWM_STAGES + 1; /* pwm_tbl[PWM_STAGES - 1] + 1; // maybe not needed ...*/
 				// timer on, timer cleared on compare match with OCR1C, prescaler 1/128 => F_TIMER = 31kHz
 				TCCR1 = _BV(CTC1) | _BV(CS13);
-				OCR1C = pwm_tbl[15] + 1;
-				// PWM-Mode, OC1B (PB4) cleared on compare match, set when TCNT1 = OCR1C
-				GTCCR = _BV(PWM1B) | _BV(COM1B0);
-				OCR1B = pwm_tbl[(pack.PIO_Output_Latch_State & 0xf0) >> 4];
+				OCR1B = i;
 			}
 			else {
 				/* stop timer and disconnect output, shut down timer to save power */
@@ -672,10 +698,11 @@ void ow_loop()
 		} else if (config_info[CFG_CFG_ID + 5] == CFG_OUT_PWM) {
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 			if (pack.PIO_Output_Latch_State > 0) {
+				uint8_t i = (pack.PIO_Output_Latch_State & 0xfC) >> 2;
 				/* PWM on PA5 / PIO5 */
 				TCCR1A = _BV(COM1B1) /*| _BV(COM1B0)*/ | _BV(WGM00);
 				TCCR1B = /*_BV(WGM13) | _BV(WGM12) | */ _BV(CS12);
-				OCR1B = pwm_tbl[(pack.PIO_Output_Latch_State & 0xf0) >> 4];
+				OCR1B = i;
 			} else {
 				TCCR1A = 0;
 				TCCR1B = 0;
