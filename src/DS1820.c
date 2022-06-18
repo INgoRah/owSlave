@@ -110,19 +110,26 @@ void temp_setup()
 /* stores the read and calculated temperature in temp */
 void temp_read()
 {
+	int off = config_info2[1] | config_info2[0] << 8;
+	int k1 = (config_info2[3] | config_info2[2] << 8);
+
+#if defined(BMP280_SUPPORT) || defined(DHT22_SUPPORT)
+	int16_t t;
+
 #ifdef BMP280_SUPPORT
-	int32_t data = bmp280_readT();
-	packt.temp = bmp280_compensate_T16(data);
+	t = bmp280_compensate_T16(bmp280_readT());
+#else
+	if (dht22_read() != 0)
+		return;
+	packt.rrFF = dht22_readH();
+	t = dht22_readT();
+#endif /* BMP280_SUPPORT */
+	t = (int16_t) ((float)t * k1);
+	t -= off;
+	packt.temp = (packt.temp + t) / 2;
 	pack.Status |= 0x02;
 	_ms += 5;
-#elif DHT22_SUPPORT
-	if (dht22_read() == 0) {
-		packt.temp = dht22_readT();
-		packt.rrFF = dht22_readH();
-		pack.Status |= 0x02;
-	}
-	_ms += 5;
-#else
+#else /* defined(BMP280_SUPPORT) || defined(DHT22_SUPPORT) */
 	PRR &= ~(1<<PRADC);
 	_delay_us (20);
 	ADCSRB &= ~(1<<ACME);
@@ -161,8 +168,6 @@ void temp_read()
 	} else 	{
 		int16_t temp;
 		float k, t;
-		int off = config_info2[1] | config_info2[0] << 8;
-		int k1 = (config_info2[3] | config_info2[2] << 8);
 		k = k1 / 100 * 16;
 		k = k / 100;
 		off = (off >> 1);
