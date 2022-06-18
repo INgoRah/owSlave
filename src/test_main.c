@@ -840,6 +840,9 @@ int main()
 
     UNITY_BEGIN();
 	memset (config_info, 0xff, sizeof(config_info));
+	ret = test_pinset();
+	if (ret != 0)
+		printf ("test_pinset issue");
 	RUN_TEST (thermo_handle);
 	RUN_TEST (thermo_handle_overwrite);
 	RUN_TEST (pinChgTest);
@@ -851,9 +854,6 @@ int main()
 	ret = owGlobalTest();
 	if (ret != 0)
 		printf ("owGlobalTest issue");
-	ret = test_pinset();
-	if (ret != 0)
-		printf ("test_pinset issue");
 
 	if (ret != 0)
 		printf ("issue");
