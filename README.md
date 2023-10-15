@@ -76,6 +76,7 @@ Version 1.1
   ### Configuration Definition
   SWx  [3..10]
     Auto switch an ouput on (short) press of this pin. Output starts with 1 (1 switches PIO0...).
+    Example: SW4 = 0x01 switches PI0 on latch 4
     0x80 disables it,
     0x10 - 0x20 are reserved for future double and tripple press
     0x40 reserved for timer based switching

@@ -126,7 +126,7 @@ void temp_read()
 #endif /* BMP280_SUPPORT */
 	t = (int16_t) ((float)t * k1);
 	t -= off;
-	packt.temp = (packt.temp + t) / 2;
+	packt.temp = (3 * packt.temp + t) / 4;
 	pack.Status |= 0x02;
 	_ms += 5;
 #else /* defined(BMP280_SUPPORT) || defined(DHT22_SUPPORT) */

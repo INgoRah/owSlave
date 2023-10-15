@@ -20,6 +20,10 @@ Reduce crc functions
 ## Bugs
 [x] Initial boot up not showing in search
 [x] check config saving - maybe broken
+[ ] After (only) a reset the slaves triggers a watchdog and switches off
+    Handle timeout if mode = OW_READ_ROM_COMMAND? or
+    reset mode after timeout
+    not triggering a watchdog on OW activity? - but sleep?
 
 # Master
 
