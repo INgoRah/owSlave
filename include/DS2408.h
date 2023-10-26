@@ -125,7 +125,7 @@
 #define SIG_ACT 1
 #define SIG_ARM 2
 
-#define MIN_VERSION 5
+#define MIN_VERSION 6
 #define MAJ_VERSION 1
 
 /** Auto switch config for each PIO

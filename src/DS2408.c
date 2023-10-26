@@ -552,18 +552,20 @@ void reg_init(void)
 */
 void cfg_init(void)
 {
+	uint8_t crc_calc;
 #ifndef AVRSIM
 	int to = 100;
 
-	/* let power stabalize */
-	/*_delay_ms(20); */
 	while (!eeprom_is_ready() && to--)
 		_delay_ms(2);
 
 	eeprom_read_block((void*)owid, (const void*)0, 8);
-#endif
-	if (owid[0] != 0x29 || (owid[3] != ~owid[1])) {
+#endif /* AVRSIM */
+	crc_calc = crc(owid, 7);
+	if (owid[0] != 0x29 || crc_calc != owid[7]) {
 		owid[0] = 0x29;
+		owid[1] = DEFAULT_OWID_ADR;
+		owid[2] = DEFAULT_OWID_BUS;
 		owid[3] = ~owid[1];
 		owid[4] = ~owid[2];
 		owid[5] = 0x66;
@@ -949,7 +951,10 @@ void pin_change_loop()
 				case CFG_PASS:
 				case CFG_PASS_INV:
 				case CFG_PASS_INV_PU:
-					// latch only on change!
+					/* filter out disturber */
+					_delay_ms(2);
+					in = !!(PIN_REG & pio_map[i]);
+					/* latch only on change! */
 					if ((in && (pack.PIO_Logic_State & mask) == 0) ||
 					    (!in && (pack.PIO_Logic_State & mask) != 0)) {
 						pack.FF1 = 0xff;
