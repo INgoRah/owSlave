@@ -218,6 +218,46 @@ static inline void latch_state(uint8_t mask)
 	pack.PIO_Activity_Latch_State |= mask;
 }
 
+#if 1
+static void pin_sync_ls(uint8_t pins, uint8_t id, uint8_t p, uint8_t mask)
+{
+	if (config_info[CFG_CFG_ID + id] == CFG_OUT_HIGH) {
+		if (pins & p)
+			pack.PIO_Logic_State &= ~mask;
+		else
+			pack.PIO_Logic_State |= mask;
+		return;
+	}
+	if (pins & p)
+		pack.PIO_Logic_State |= mask;
+	else
+		pack.PIO_Logic_State &= ~mask;
+}
+
+/* Function is / must be protected by interrupts */
+static void sync_pins()
+{
+	uint8_t pins, i = 0;
+
+	pins = PIN_REG;
+	pin_sync_ls(pins, i++, PIN_PIO0, 0x1);
+	pin_sync_ls(pins, i++, PIN_PIO1, 0x2);
+	pin_sync_ls(pins, i++, PIN_PIO2, 0x4);
+	pin_sync_ls(pins, i++, PIN_PIO3, 0x8);
+#ifdef PIN_PIO4
+	pin_sync_ls(pins, i++, PIN_PIO4, 0x10);
+#endif
+#ifdef PIN_PIO5
+	pin_sync_ls(pins, i++, PIN_PIO5, 0x20);
+#endif
+#ifdef PIN_PIO6
+	pin_sync_ls(pins, i++, PIN_PIO6, 0x40);
+#endif
+#ifdef PIN_PIO7
+	pin_sync_ls(pins, i++, PIN_PIO7, 0x80);
+#endif
+}
+#else
 /* Function is / must be protected by interrupts */
 static void sync_pins()
 {
@@ -226,7 +266,7 @@ static void sync_pins()
 	pins = PIN_REG;
 	uint8_t i, mask = 1;
 
-	for (i = 0; i < sizeof(pio_map) / sizeof(pio_map[0]); i++) {
+	for (i = 0; i < sizeof(pio_map); i++) {
 		uint8_t p = pio_map[i];
 		if (p != 0) {
 			switch (config_info[CFG_CFG_ID + i])
@@ -248,6 +288,7 @@ static void sync_pins()
 		mask = mask << 1;
 	}
 }
+#endif
 
 ISR(PCINT0_vect) {
 	btn_active = 1;
@@ -601,8 +642,6 @@ void cfg_init(void)
 #else
 		/* default new version */
 		config_info[CFG_TYPE_ID] = 1;
-		config_info[1] = 0xDE;
-		config_info[2] = 0xAD;
 #endif
 	}
 #endif

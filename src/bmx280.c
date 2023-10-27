@@ -29,7 +29,7 @@ int16_t bmp280_compensate_T16(int32_t adc_T)
 	return T;
 }
 
-uint16_t bmp280_read16(uint8_t adr)
+static uint16_t bmp280_read16(uint8_t adr)
 {
 	uint8_t lsb, msb;
 

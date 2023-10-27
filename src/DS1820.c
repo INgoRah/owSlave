@@ -96,7 +96,7 @@ void temp_setup()
 	/* 12 bit resolution */
 	packt.config = 0x60;
 	alarmflag2 = 0;
-	packt.temp = 0;
+	packt.temp = 20;
 	last_temp = 0;
 	/* force full update */
 	do_temp = 4;
