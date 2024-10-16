@@ -14,6 +14,9 @@ Reduce crc functions
 [ ] configurable timer on slave
 [ ] EEPROM protection switch
 [ ] enhanced per pin config <pin> <auto sw> <config> <timer>
+[ ] timed switch: <pin> <time> <config>
+    - time in 10 second steps
+    - config: dim down off, fast, slow
 [ ] auto switch on long press (upper bits)
 [ ] detect double or even triple press
 
@@ -24,6 +27,7 @@ Reduce crc functions
     Handle timeout if mode = OW_READ_ROM_COMMAND? or
     reset mode after timeout
     not triggering a watchdog on OW activity? - but sleep?
+[ ] Boot up with low 1-wire not working ?
 
 # Master
 
