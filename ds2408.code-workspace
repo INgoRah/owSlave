@@ -8,5 +8,11 @@
 			"path": "D:\\Projects\\Arduino\\ds2482"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.associations": {
+			"interrupt.h": "c",
+			"i2cmaster.h": "c",
+			"arduino.h": "c"
+		}
+	}
 }

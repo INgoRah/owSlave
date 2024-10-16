@@ -11,14 +11,17 @@ Reduce crc functions
 [?] test mode
 [ ] regression testing signal generation and improvements (bus detection and delay)
 [x] watchdog for long button press (or no end state after 2 secs), mode != 0 and signal not acknowledged.
-[ ] configurable timer on slave
+[x] configurable timer on slave
 [ ] EEPROM protection switch
-[ ] enhanced per pin config <pin> <auto sw> <config> <timer>
-[ ] timed switch: <pin> <time> <config>
+[x] enhanced per pin config <pin> <auto sw> <config> <timer>
+[x] timed switch: <pin> <time> <config>
     - time in 10 second steps
-    - config: dim down off, fast, slow
+    - config: dim down off global configurable time
 [ ] auto switch on long press (upper bits)
 [ ] detect double or even triple press
+[ ] CRC on pin config
+[ ] check PWM on Tinys
+[ ] Multiple timers
 
 ## Bugs
 [x] Initial boot up not showing in search

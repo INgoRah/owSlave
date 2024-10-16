@@ -276,7 +276,18 @@ h_fwconfiginfo:
 #warning No CRC known code implemented
 #endif
 h_fwconfiginfo_end:
+	lds r_temp,cfg_type
+	; is type 1?
+	cpi r_temp, 1
+	; no, so default config_info
+	brne h_fw_r_def_config_info
+	; yes: read custom config
+	configZ cfg_custom1,r_bytep
+	rjmp h_fw_r_custom_cfg
+
+h_fw_r_def_config_info:
 	configZ config_info,r_bytep
+h_fw_r_custom_cfg:
 	ld   r_rwbyte,Z
 	rjmp handle_end_inc
 h_fwconfiginfo_crc:
@@ -296,7 +307,26 @@ h_fwconfiginfo_all:
 	rjmp handle_end_sleep
 
 h_fwwriteconfig:
+#ifdef TIMER_SUPPORT
+	; check if first byte
+	cpi  r_bytep,0
+	brne h_fwconfiginfo_selcfg
+	; 1st byte, so store
+	sts cfg_type,r_rwbyte
+
+h_fwconfiginfo_selcfg:
+	; select config typ
+	lds r_temp,cfg_type
+	; is type 1?
+	cpi r_temp, 1
+	brne h_fwconfiginfo_defcfg
+	; yes, custom config
+	configZ cfg_custom1,r_bytep
+	rjmp h_fwconfiginfo_customcfg
+#endif
+h_fwconfiginfo_defcfg:
 	configZ config_info,r_bytep
+h_fwconfiginfo_customcfg:
 	st   Z,r_rwbyte
 	cpi  r_bytep,22
 	breq h_writeconfig_all

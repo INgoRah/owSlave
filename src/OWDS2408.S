@@ -50,7 +50,7 @@
 .endm
 
 .macro COMMAND_TABLE
-		rjmp h_readpioregaddr
+		rjmp h_readpioregaddr ; OW_READ_PIO_REG_ADDR = 0
 		rjmp h_readpioreg
 		rjmp h_readpioregcrc1
 		rjmp h_readpioregcrc2
@@ -58,11 +58,17 @@
 		rjmp h_readchanel_crc
 		rjmp h_writechanel
 		rjmp h_writecomchanel
-		rjmp h_writesendaa
+		rjmp h_writesendaa ; OW_WRITE_SENDAA
 		rjmp h_writesendchanel
-		rjmp h_resetactivity
+		rjmp h_resetactivity ; OW_RESET_ACTIVITY
 		rjmp h_writeregaddr
-		rjmp h_writereg
+		rjmp h_writereg ; OW_WRITE_REG = 12
+#ifdef TIMER_SUPPORT
+		rjmp h_pintimer ; OW_PIN_TIMER = 13
+		rjmp h_pintimer_crc1 ; OW_PIN_TIMER_CRC1
+		rjmp h_pintimer_crc2
+		rjmp h_pintimer_done
+#endif
 #ifdef DS1820_SUPPORT
 		rjmp h_readscratchpad
 		rjmp h_writescratchpad
@@ -92,15 +98,28 @@
 #define OW_RESET_ACTIVITY OW_FIRST_COMMAND+10
 #define OW_WRITE_REG_ADDR OW_FIRST_COMMAND+11
 #define OW_WRITE_REG OW_FIRST_COMMAND+12
+#ifdef TIMER_SUPPORT
+#define OW_PIN_TIMER OW_FIRST_COMMAND+13
+#define OW_PIN_TIMER_CRC1 OW_FIRST_COMMAND+14
+#define OW_PIN_TIMER_CRC2 OW_FIRST_COMMAND+15
+#define OW_PIN_TIMER_DONE OW_FIRST_COMMAND+16
+#define OW_NEXT_CMD 17
+#else
+#define OW_NEXT_CMD 13
+#endif
 #ifdef DS1820_SUPPORT
-#define OW_READ_SCRATCHPAD OW_FIRST_COMMAND+13
-#define OW_WRITE_SCRATCHPAD OW_FIRST_COMMAND+14
-#define OW_CONVERT_RUN OW_FIRST_COMMAND+15
+#define OW_READ_SCRATCHPAD OW_FIRST_COMMAND+OW_NEXT_CMD
+#define OW_WRITE_SCRATCHPAD OW_FIRST_COMMAND+OW_NEXT_CMD+1
+#define OW_CONVERT_RUN OW_FIRST_COMMAND+OW_NEXT_CMD+2
+#endif
+#ifdef DS2450_SUPPORT
 #endif
 
 ;---------------------------------------------------
 ;	READ COMMAND and start operation
 ;---------------------------------------------------
+#ifdef DS2450_SUPPORT
+#endif
 
 #ifdef DS1820_SUPPORT
 
@@ -143,8 +162,12 @@ h_convert_run:
 	rjmp handle_end_no_bcount
 
 hrc_recall_eeprom1:
+#if 1
+	rjmp handle_end_sleep
+#else
 	rcall hrc_recall_eeprom_func1
 	rjmp handle_end
+#endif
 
 hrc_copy_scratchpad:
 	ldi r_bytep,2
@@ -167,6 +190,7 @@ hrc_copy_scratchpad_EEPROM_write1:
 	brne hrc_copy_scratchpad_EEPROM_write1
 	rjmp handle_end
 
+#if 0
 hrc_recall_eeprom_func1:
 	ldi r_bytep,2
 	configZ packt,r_bytep
@@ -184,6 +208,7 @@ hrc_recall_eeprom_EEPROM_read1:
 	cpi r_bytep,3
 	brne hrc_recall_eeprom_EEPROM_read1
 	ret
+#endif
 
 ;---------------------------------------------------
 ;   READ SCRATCHPAD
@@ -241,12 +266,14 @@ h_readcommand:
 	cljmp 0xC3,hrc_reset_activity
 	cset 0xCC,OW_WRITE_REG_ADDR
 	FW_CONFIG_INFO
+#ifdef TIMER_SUPPORT	
+	cset 0xC5,OW_PIN_TIMER
+#endif
 #ifdef _CHANGEABLE_ID_
 	CHANGE_ID_COMMANDS
 #endif
 	ldi r_mode,OW_SLEEP
 	rjmp handle_end
-
 
 h_readpioregaddr:
 	cpi r_bytep,0  ;erstes Adressbyte ?
@@ -391,6 +418,40 @@ h_writereg:
 h_writereg_end:
 	rjmp handle_end_sleep
 
+#ifdef TIMER_SUPPORT
+h_pintimer:
+	; receiving bytes for pin timer
+	configZ pin_tmr,r_bytep
+	st   Z,r_rwbyte
+	inc  r_bytep
+	cpi  r_bytep,4
+	; received 4 bytes, so ack
+	breq h_pintimer_sendack
+	rjmp handle_end
+h_pintimer_sendack:
+	lds r_rwbyte,crc16
+	com r_rwbyte
+	lds r_temp,crc16+1
+	com r_temp
+	sts crcsave,r_temp
+	ldi r_temp,0x40
+	sts gcontrol,r_temp
+	ldi r_mode,OW_PIN_TIMER_CRC1
+	ldi r_sendflag,1 ; now slave is transmitting
+	rjmp handle_end
+h_pintimer_crc1:
+	lds r_rwbyte,crcsave
+	ldi r_mode,OW_PIN_TIMER_CRC2
+	rjmp handle_end
 
+h_pintimer_crc2:
+	lds r_rwbyte,crcsave
+	;ldi r_bcount,1
+	ldi r_mode,OW_PIN_TIMER_DONE
+	rjmp handle_end
+
+h_pintimer_done:
+	rjmp handle_end_sleep
+#endif /* TIMER_SUPPORT */
 #include "../include/OWPinInterrupt.s"
 .end

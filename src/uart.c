@@ -3,6 +3,9 @@
 
 #define BAUDRATE 19200 //9600
 
+void serial_write(unsigned char c);
+void serial_init(void);
+
 void serial_init(void)
 {
 	/* Set the baud rate */
