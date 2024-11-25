@@ -36,6 +36,7 @@
 #include <avr/wdt.h>
 #include <avr/sleep.h>
 #include "Arduino.h"
+#include "wiring.h"
 
 #include "owSlave_tools.h"
 #include "DS2408.h"
@@ -56,10 +57,12 @@
 		WDTCSR |= _BV(WDIE); \
 	}while(0);
 
+static void temp_update();
+
 /* for status update */
 extern pack_t pack;
 extern uint8_t int_signal;
-extern uint8_t config_info2[26];
+extern uint8_t config_info2[8];
 extern unsigned long _ms;
 
 volatile packt_t packt;
@@ -112,7 +115,6 @@ void temp_read()
 {
 	int off = config_info2[1] | config_info2[0] << 8;
 	int k1 = (config_info2[3] | config_info2[2] << 8);
-
 #if defined(BMP280_SUPPORT) || defined(DHT22_SUPPORT)
 	int16_t t;
 
@@ -130,6 +132,8 @@ void temp_read()
 	pack.Status |= 0x02;
 	_ms += 5;
 #else /* defined(BMP280_SUPPORT) || defined(DHT22_SUPPORT) */
+	// TODO replace by analogRead with mux = _BV(REFS1) | 0x22 or _BV(REFS1) | 0xf
+#ifndef ATMEGA
 	PRR &= ~(1<<PRADC);
 	_delay_us (20);
 	ADCSRB &= ~(1<<ACME);
@@ -156,9 +160,17 @@ void temp_read()
 	/* awake again, reading should be done, but better make sure
 	   maybe the timer interrupt fired */
 	while (bit_is_set (ADCSRA, ADSC));
+#endif
 	/* Calculate the temperature in C by averaging over 4 measurements */
 	if (cnt < 4) {
+#ifdef ATMEGA
+		int a = analogRead(0);
+		adc += a;
+		packt.rrFF = a;
+		pack.Status |= 0x02;
+#else
 		adc += ADC;
+#endif
 		cnt++;
 		// still doing updates till 4 values can be averaged
 		if (cnt == 4)
@@ -166,6 +178,7 @@ void temp_read()
 		else
 			do_temp = 4;
 	} else 	{
+#ifndef ATMEGA		
 		int16_t temp;
 		float k, t;
 		k = k1 / 100 * 16;
@@ -177,18 +190,18 @@ void temp_read()
 		if (config_info2[1] & 0x1)
 			temp -= 8;
 
-		config_info2[8] = (uint8_t)((adc & 0xff00)) >> 8;
-		config_info2[9] = (uint8_t)(adc & 0xff);
 		packt.temp = temp;
+#endif
 	}
-
+#ifndef ATMEGA
 	ADCSRA = 0;
 	PRR |= (1<<PRADC);  /*Switch off adc for save Power */
+#endif
 	_ms++;
 #endif
 }
 
-void temp_update()
+static void temp_update()
 {
 	if (last_temp == 0 && packt.temp != 0)
 		last_temp = packt.temp;

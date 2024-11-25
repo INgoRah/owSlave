@@ -29,7 +29,7 @@
 ;
 ;*************************************************************************
 
-
+#ifdef I2C_MASTER
 #include <avr/io.h>
 
 #undef SCL_PORT
@@ -386,3 +386,4 @@ i2c_put_ack_wait:
 	ret
 	.endfunc
 
+#endif

@@ -416,14 +416,33 @@ h_fwconfiginfo_crc:
 	configZ config_info1,r_bytep
 	ld   r_rwbyte,Z
 	rjmp handle_end_inc
-
 #endif
 h_fwconfiginfo_all:
 	rjmp handle_end_sleep
 #endif
 
+
 h_fwwriteconfig1:
+#ifdef TIMER_SUPPORT
+	; check if first byte
+	cpi  r_bytep,0
+	brne h_fwconfiginfo_selcfg
+	; 1st byte, so store
+	sts cfg_type,r_rwbyte
+
+h_fwconfiginfo_selcfg:
+	; select config typ
+	lds r_temp,cfg_type
+	; is type 1?
+	cpi r_temp, 1
+	brne h_fwconfiginfo_defcfg
+	; yes, custom config
+	configZ cfg_custom1,r_bytep
+	rjmp h_fwconfiginfo_customcfg
+#endif
+h_fwconfiginfo_defcfg:
 	configZ config_info1,r_bytep
+h_fwconfiginfo_customcfg:
 	st   Z,r_rwbyte
 	cpi  r_bytep,22
 	breq h_writeconfig_all

@@ -67,7 +67,6 @@
 #endif
 
 #if defined(__AVR_ATtiny85__)
-#define ACTIVE_LOW
 #define PORT_REG PORTB
 #define PIN_REG PINB
 #define PIN_DDR DDRB
@@ -90,8 +89,6 @@
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
 #define TIMSK TIMSK0
-/* means: 0 is output low, 1 input high (seen from owfs) */
-#define ACTIVE_LOW
 #define PIN_REG PINA
 #define PORT_REG PORTA
 #define PIN_DDR DDRA
@@ -119,20 +116,41 @@
 #endif
 #endif
 
-#define CHAN_VALUES 16
+#define MIN_VERSION 7
+#define MAJ_VERSION 1
+#define CHAN_VALUES 4
 
 #define SIG_NO 0
 #define SIG_ACT 1
 #define SIG_ARM 2
 
-#define MIN_VERSION 6
-#define MAJ_VERSION 1
+#ifndef MAX_TIMER
+/* maximum number of timers */
+#define MAX_TIMER 1
+#endif
+
+/* see active doc */
+#define ACT_BUTTON 0x01
+#define ACT_TIMER1 0x02
+#define ACT_TIMER2 0x04
+#define ACT_TIMER3 0x08
+#define ACT_DIM_DN1 0x10
+#define ACT_DIM_DN2 0x20
+#define ACT_DIM_DN3 0x40
+#define ACT_TIMER1_ALL (ACT_TIMER1 | ACT_DIM_DN1)
+#define ACT_TIMER2_ALL (ACT_TIMER2 | ACT_DIM_DN2)
+#define ACT_TIMER3_ALL (ACT_TIMER3 | ACT_DIM_DN3)
+#define ACT_TIMER (ACT_TIMER1_ALL | ACT_TIMER2_ALL | ACT_TIMER3_ALL)
 
 /** Auto switch config for each PIO
- *  0xff = default / off
- *  range from 1 (=PIO0) .. 8 (=PIO8) otherwise invalid or deactivated
+ * 0xff, 0 = default / off
+ * 0xf*, temporary disable (e.g. deactivate thermostat in summer)
+ * range from 1 (=PIO0) .. 8 (=PIO8) for static auto switch
+ * bit 0x20 for timed retriggering switch, time in CFG_PINx_TMR
  * */
 #define CFG_SW_ID 3  /* .. 10 */
+#define CFG_SW_TIMED 0x20
+
 /*
  * PIO configuration
  */
@@ -188,6 +206,7 @@
 
 #define CFG_CFG_FEAT 19
 #define FEAT_TEMP 0x01
+#define FEAT_ADC_LIGHT 0x02
 
 #define CFG_OFFSET 20
 
@@ -204,6 +223,60 @@
 
 #define CFG_PIN_PWM 1
 #define CFG_PIN_DEF 0xff
+
+/* Defines for timed triggers and pin auto timer (upper 5 bits)
+ * Auto switches always uses a configured default time 
+ * in CFG_PIN1_TMR or CFG_PIN2_TMR.
+ */
+/** Trigger (or retrigger) if dark.
+ * Needs light sensor */
+#define TMR_TYPE_TRG_DARK 0x10
+/** Trigger (or retrigger) if dark and dim down.
+ * Needs light sensor */
+#define TMR_TYPE_TRG_DIM_DARK 0x20
+/** Start with time if dark. Needs light sensor */
+#define TMR_TYPE_START_DARK 0x30
+/** Start if dark and dim up. Needs light sensor or
+ *  external brightness setting
+ *  Not yet supported! */
+#define TMR_TYPE_START_DIM_DARK 0x40
+
+/** Trigger (or retrigger)  */
+#define TMR_TYPE_TRG 0x50
+/** Trigger (or retrigger) and dim down */
+#define TMR_TYPE_TRG_DIM 0x60
+/** Start (with stop on next press) with time */
+#define TMR_TYPE_START 0x70
+/** Start (with stop on next press) with time and dim up */
+#define TMR_TYPE_START_DIM 0x80
+/* TODO long press auto toggle?? */
+
+/* Commands available in pin timer command */
+/** Configure brigthness if no sensor available */
+#define TMR_TYPE_BRIGHTNESS 0xE3
+/** Configure brigthness threshold when to switch */
+#define TMR_TYPE_THRESHOLD 0xE5
+
+/** Switch on without timer (force on) */
+#define TMR_TYPE_ON 0xDD
+/** Switch on without timer (force on) with dim up */
+#define TMR_TYPE_ON_DIM 0xDB
+/** Switch off and stop timer if running (force off) */
+#define TMR_TYPE_STOP 0xEE
+/** Switch off with dim down and stop timer if running (force off) */
+#define TMR_TYPE_STOP_DIM 0xEB
+
+#define CFG_CUSTOM1_THR 1
+#define CFG_CUSTOM1_DIMD 2
+/* Not yet supported */
+#define CFG_CUSTOM1_DIMU 3
+/* Not yet supported, issues on ATtiny85 */
+#define CFG_CUSTOM1_DIF 4
+#define CFG_CUSTOM1_TM1 5
+#define CFG_CUSTOM1_TM2 6
+#define CFG_CUSTOM1_SWA0 7 /* .. SWA7 = 14*/
+/* Not yet supported */
+#define CFG_CUSTOM1_SWB0 CFG_CUSTOM1_SWA0 + 8
 
 typedef union {
 	volatile uint8_t bytes[0x20];
@@ -232,7 +305,28 @@ typedef union {
 	};
 } pack_t;
 
+typedef union
+{
+	volatile uint8_t bytes[4];
+	struct
+	{
+		/** See TMR_TYPE_xxx defines */
+		uint8_t type;
+		/** Pin number 0..7 */
+		uint8_t pin : 3;
+		/** Channel number 0..3. For future use
+		 * e.g. RGB and white */
+		uint8_t ch : 2;
+		/** For future use */
+		uint8_t feat : 3;
+		/** Time in 10ms or config for non static switch. 
+		 *  If 0 use the confiugred default time */
+		uint8_t val1;
+		/** Level for PWM outputs or 0xaa in case of config */
+		uint8_t val2;
+	};
+} pin_t;
+
 uint8_t auto_switch(uint8_t i, uint8_t val);
 void latch_out(uint8_t bb);
-
 #endif /* DS2408_H */

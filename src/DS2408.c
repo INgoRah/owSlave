@@ -45,6 +45,7 @@
 #include <avr/eeprom.h>
 #include "owSlave_tools.h"
 #include "Arduino.h"
+#include "wiring.h"
 #include "pins.h"
 #ifdef HAVE_UART
 #include "uart.h"
@@ -57,6 +58,8 @@
 #ifdef DS1820_SUPPORT
 #include "DS1820.h"
 #endif
+
+#define CFG_CUSTOM1 39 // (7 + CFG_TYPE_ID + 9)
 
 #define wdt_tim_enable() do { \
 		cli(); \
@@ -71,14 +74,26 @@
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
 extern uint8_t stat_to_sample;
+
+void setup();
+void loop();
+static void ow_loop();
+static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p);
+static void pin_change_loop();
+
 static void owResetSignal(void);
-void reg_init(void);
-void var_init(void);
-static uint8_t auto_toggle(uint8_t i);
+static void reg_init(void);
+static void var_init(void);
+static void cfg_init(void);
+static void auto_toggle(uint8_t i);
+#ifdef TIMER_SUPPORT
+static void timed_switch(uint8_t type, uint8_t tim);
+#endif /* TIMER_SUPPORT */
 void statusPrint();
+static void pin_set(uint8_t p, uint8_t id, uint8_t bb);
 
 /* bit number in PIN register to IO mapping */
-const uint8_t pio_map [MAX_BTN] = {
+const uint8_t pio_map[MAX_BTN] = {
 	PIN_PIO0,
 	PIN_PIO1,
 #ifdef PIN_PIO2
@@ -112,25 +127,26 @@ uint8_t owid2[8];
 uint8_t owid[8];
 #endif
 
-#ifndef ATMEGA
-#define PWM_STAGES 63
-#if 0
-static const uint8_t pwm_tbl[PWM_STAGES] = {
-	1,   2,   3,   5,   8,   13,  21,  34,
-	55,  76,  90,  100, 110, 120, 130, 140,
-	150, 160, 170, 180, 190, 200, 205, 210,
-	215, 220, 225, 230, 235, 240, 245, 250 };
-#endif
-#endif
-
 volatile pack_t pack;
 
 #ifdef DUAL_ROM
 uint8_t config_info1[26];
 #define config_info config_info1
-uint8_t config_info2[26];
+uint8_t config_info2[8];
 #else
 #endif
+#ifdef TIMER_SUPPORT
+volatile pin_t pin_tmr;
+uint8_t cfg_custom1[22];
+uint8_t cfg_type;
+
+struct {
+	unsigned long tmr;
+	uint8_t pin;
+	uint8_t lvl;
+	uint8_t type;
+}tmr[MAX_TIMER];
+#endif /* TIMER_SUPPORT */
 
 /*
  * config from EEPROM
@@ -143,12 +159,16 @@ struct pinState btn[MAX_BTN];
 uint8_t values[CHAN_VALUES];
 uint8_t ap = 0;
 uint8_t int_signal;
-volatile uint8_t btn_active = 0;
+/** Activity state bitmask
+ * ACT_BUTTON (1): button handling active
+ * x: timer running
+ */
+volatile uint8_t active = 0;
 #ifdef WITH_LEDS
 static uint8_t led2 = 0;
 #endif
 
-#ifdef WITH_LEDS
+#ifdef WITH_LEDS_FLASH
 static void led_flash(void)
 {
 #ifndef AVRSIM // defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
@@ -165,6 +185,7 @@ static void led_flash(void)
 }
 #endif
 
+// TODO use assembly function
 static uint8_t crc(uint8_t* input, uint8_t len) {
 	unsigned char inbyte, crc = 0;
 	unsigned char i, mix;
@@ -218,46 +239,6 @@ static inline void latch_state(uint8_t mask)
 	pack.PIO_Activity_Latch_State |= mask;
 }
 
-#if 1
-static void pin_sync_ls(uint8_t pins, uint8_t id, uint8_t p, uint8_t mask)
-{
-	if (config_info[CFG_CFG_ID + id] == CFG_OUT_HIGH) {
-		if (pins & p)
-			pack.PIO_Logic_State &= ~mask;
-		else
-			pack.PIO_Logic_State |= mask;
-		return;
-	}
-	if (pins & p)
-		pack.PIO_Logic_State |= mask;
-	else
-		pack.PIO_Logic_State &= ~mask;
-}
-
-/* Function is / must be protected by interrupts */
-static void sync_pins()
-{
-	uint8_t pins, i = 0;
-
-	pins = PIN_REG;
-	pin_sync_ls(pins, i++, PIN_PIO0, 0x1);
-	pin_sync_ls(pins, i++, PIN_PIO1, 0x2);
-	pin_sync_ls(pins, i++, PIN_PIO2, 0x4);
-	pin_sync_ls(pins, i++, PIN_PIO3, 0x8);
-#ifdef PIN_PIO4
-	pin_sync_ls(pins, i++, PIN_PIO4, 0x10);
-#endif
-#ifdef PIN_PIO5
-	pin_sync_ls(pins, i++, PIN_PIO5, 0x20);
-#endif
-#ifdef PIN_PIO6
-	pin_sync_ls(pins, i++, PIN_PIO6, 0x40);
-#endif
-#ifdef PIN_PIO7
-	pin_sync_ls(pins, i++, PIN_PIO7, 0x80);
-#endif
-}
-#else
 /* Function is / must be protected by interrupts */
 static void sync_pins()
 {
@@ -288,10 +269,9 @@ static void sync_pins()
 		mask = mask << 1;
 	}
 }
-#endif
 
 ISR(PCINT0_vect) {
-	btn_active = 1;
+	active |= ACT_BUTTON;
 #if defined(GIFR) && defined(PCIF0)
 	GIFR = _BV(PCIF0);
 #endif
@@ -302,7 +282,7 @@ ISR(PCINT0_vect) {
 
 /* sets a pin, but does not change any interrupt on that pin.
   If the pin was configured as input, the interupt is active. */
-void pin_set(uint8_t p, uint8_t id, uint8_t bb)
+static inline void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 {
 	if (pack.PIO_Output_Latch_State & bb) {
 		/* According to spec:
@@ -312,7 +292,7 @@ void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 		pack.PIO_Logic_State |= bb;
 		if (config_info[CFG_CFG_ID + id] == CFG_OUT_PWM ||
 			config_info[CFG_CFG_ID + id] == CFG_OUT_HIGH) {
-			/* no pull up */
+			/* output low */
 			PIN_DDR |= p;
 			PORT_REG &= ~p;
 		} else {
@@ -320,6 +300,7 @@ void pin_set(uint8_t p, uint8_t id, uint8_t bb)
 			/* input and enable pull up - DS2408 standard */
 			PIN_DDR &= ~(p);
 			PORT_REG |= (p);
+
 		}
 	} else {
 		/* set 0 / 0 = conducting (on) */
@@ -358,42 +339,34 @@ void latch_out(uint8_t bb)
 	switch (bb)
 	{
 		case 0x1:
-			p = PIN_PIO0;
 			id = 0;
 			break;
 		case 0x2:
-			p = PIN_PIO1;
 			id = 1;
 			break;
 		case 0x4:
-			p = PIN_PIO2;
 			id = 2;
 			break;
 		case 0x8:
-			p = PIN_PIO3;
 			id = 3;
 			break;
 #ifdef PIN_PIO4
 		case 0x10:
-			p = PIN_PIO4;
 			id = 4;
 			break;
 #endif
 #ifdef PIN_PIO5
 		case 0x20:
-			p = PIN_PIO5;
 			id = 5;
 			break;
 #endif
 #ifdef PIN_PIO6
 		case 0x40:
-			p = PIN_PIO6;
 			id = 6;
 			break;
 #endif
 #ifdef PIN_PIO7
 		case 0x80:
-			p = PIN_PIO7;
 			id = 7;
 			break;
 #endif
@@ -401,6 +374,7 @@ void latch_out(uint8_t bb)
 			return;
 	}
 #endif
+	p = pio_map[id];
 	cli();
 	/* logic state = real state, output_latch state inverted! */
 	if ((pack.PIO_Logic_State & bb) !=
@@ -455,7 +429,7 @@ static void owResetSignal(void)
 }
 
 /** Variables init */
-void var_init(void)
+static void var_init(void)
 {
 	int i;
 
@@ -465,9 +439,12 @@ void var_init(void)
 	pack.FF1 = 0xFF;
 	pack.FF2 = 0xFF;
 	alarmflag = 0;
-	btn_active = 0;
+	active = 0;
 	for (i = 0;i < MAX_BTN;i++)
 		initBtn(1, &btn[i]);
+#ifdef TIMER_SUPPORT
+	tmr[0].lvl = 0;
+#endif
 	pack.PIO_Activity_Latch_State = 0;
 	/* enable alarm state reporting */
 	pack.Conditional_Search_Channel_Selection_Mask = 0xFF;
@@ -476,7 +453,7 @@ void var_init(void)
 	int_signal = SIG_ARM;
 }
 
-void reg_init(void)
+static void reg_init(void)
 {
 	uint8_t p;
 	uint8_t mask;
@@ -519,6 +496,7 @@ void reg_init(void)
 		 * outputs
 		 */
 		case CFG_OUT_HIGH:
+		case CFG_OUT_PWM:
 			/* output initially active low
 			 * PIO_Logic_State (inverted) is high cause it
 			 * represents transistor output
@@ -526,6 +504,10 @@ void reg_init(void)
 			PCMSK &= ~(p); // disable interrupt
 			PIN_DDR |= (p);
 			PORT_REG &= ~(p);
+#if defined(__AVR_ATtiny85__)
+			TCNT1 = 0xff;
+			OCR1C = 0xff;
+#endif
 			break;
 			/* fall-through */
 		case CFG_OUT_LOW:
@@ -534,16 +516,6 @@ void reg_init(void)
 			 */
 			PORT_REG |= p;
 			PCMSK &= ~(p);
-			break;
-		case CFG_OUT_PWM:
-			PCMSK &= ~(p);
-			PIN_DDR |= (p);
-#if defined(__AVR_ATtiny85__)
-			TCNT1 = PWM_STAGES + 1;
-			OCR1C = PWM_STAGES + 1;
-			// PWM-Mode, OC1B (PB4) cleared on compare match, set when TCNT1 = OCR1C
-			GTCCR = _BV(PWM1B) | _BV(COM1B0);
-#endif
 			break;
 		case CFG_DEFAULT:
 		default:
@@ -554,26 +526,9 @@ void reg_init(void)
 			break;
 		}
 	}
-#if defined(__AVR_ATtiny85__)
-	/* can be removed because done in the loop above */
-	if (config_info[CFG_CFG_ID] == CFG_OUT_PWM) {
-		PCMSK &= ~(_BV(PB4));
-		PIN_DDR |= _BV(PB4);
-		/* no pull up */
-		PORT_REG &= ~_BV(PB4);
-#endif
-#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
-	if (config_info[CFG_CFG_ID + 5] == CFG_OUT_PWM) {
-		PIN_DDR |= _BV(PA5);
-		PCMSK &= ~(0x20);
-#endif
-		TCNT1 = 0xf;
-#ifndef ATMEGA
-	} else {
-		/* timer 1 not needed */
-		PRR |= _BV(PRTIM1);
-	}
-#endif
+	/* timer 1 not yet needed */
+	PRR |= _BV(PRTIM1);
+
 	sync_pins();
 	mask = 1;
 	for (int i = 0; i < MAX_BTN; i++) {
@@ -586,12 +541,13 @@ void reg_init(void)
 	}
 }
 
-/*
-  0  | 1 | 2 | 3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32
-                               0  | 1 |2 |3   4   5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32
-| 29  ID  bus  ~   ~   66  77 |CRC| RES  |SW  1   2  3  4  5  6   7  |CFG 1   2   3   4   5   6   7  |FEA |R  |MAJ|MIN|TYP|OFF    | FACT
+/* EEPROM
+  0  | 1 | 2 | 3   4   5   6   7   8   9  10  11  12 13 14 15 16 17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32
+   CFG                         0  | 1 |2 |3   4   5  6  7  8  9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  25  26  27
+   PINCFG                                 0 | 1  |2 |3  4  5  6   7   8   9  10  11  12  13  14  15  16  17  18  19  20  21  22  23  24  
+| 29  ID  bus  ~   ~   66  77 |CRC| RES  |SW  1   2  3  4  5  6   7  |CFG 1   2   3   4   5   6   7  |FEA|R  |MAJ|MIN|TYP| OFF  | FACT
 */
-void cfg_init(void)
+static void cfg_init(void)
 {
 	uint8_t crc_calc;
 #ifndef AVRSIM
@@ -622,10 +578,13 @@ void cfg_init(void)
 #ifndef AVRSIM
 	eeprom_read_block((void*)&config_info, (const void*)7, CFG_TYPE_ID);
 #ifdef DUAL_ROM
-	eeprom_read_block((void*)&config_info2, (const void*)(8 + CFG_TYPE_ID), 22);
-	config_info2[8] = 0xff;
-	config_info2[9] = 0xff;
+	eeprom_read_block((void*)&config_info2, 
+		(const void*)(8 + CFG_TYPE_ID), 
+		sizeof(config_info2));
 #endif
+#ifdef TIMER_SUPPORT
+	eeprom_read_block((void*)&cfg_custom1, (const void*)CFG_CUSTOM1, sizeof(cfg_custom1));
+#endif /* TIMEOUT_SUPPORT */
 #endif
 	config_info[CFG_VERS_ID] = MAJ_VERSION;
 	config_info[CFG_VERS_ID + 1] = MIN_VERSION;
@@ -666,17 +625,13 @@ void setup()
 	} else
 		pack.Status = 0x80;
 #endif
-#ifdef DS1820_SUPPORT
-	pack.Status = 0x80;
-#endif
 #ifndef AVRSIM
 	/* let the power supply get stable */
-	_delay_ms(100);
+	_delay_ms(50);
 #endif
 #ifdef HAVE_UART
 	serial_init();
 #endif
-
 	cfg_init();
 	var_init();
 	OWST_INIT_ALL_OFF;
@@ -684,7 +639,6 @@ void setup()
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 	reg_init();
-
 	sei();
 #ifdef DS1820_SUPPORT
 	temp_setup();
@@ -692,14 +646,13 @@ void setup()
 #ifndef AVRSIM
 	_delay_ms(50);
 #endif
-#ifdef WITH_LEDS
+#ifdef WITH_LEDS_FLASH
 	led_flash();
 #endif
 }
 
-void ow_loop()
+static void ow_loop()
 {
-
 	if (reset_indicator) {
 		ap = 0;
 		// stat_to_sample=0;
@@ -710,50 +663,13 @@ void ow_loop()
 	if (gcontrol == 0)
 		return;
 	if (gcontrol & 1) {
-		/* write, data in PIO_Output_Latch_State */
 		uint8_t i;
-		if (config_info[CFG_CFG_ID] == CFG_OUT_PWM) {
-#if defined(__AVR_ATtiny85__)
-			/* PWM on PB4 only supported. PIO0 == PB4 */
-#if PIN_PIO0 !=_BV(PB4)
-#error Not supported!
-#endif
-			if (pack.PIO_Output_Latch_State & 0xfC) {
-				uint8_t i = (pack.PIO_Output_Latch_State & 0xfC) >> 2;
-				/* wake up timer */
-				PRR &= ~_BV(PRTIM1);
-				_delay_us(10);
-				//TCNT1 = PWM_STAGES + 1; /* pwm_tbl[PWM_STAGES - 1] + 1; // maybe not needed ...*/
-				// timer on, timer cleared on compare match with OCR1C, prescaler 1/128 => F_TIMER = 31kHz
-				TCCR1 = _BV(CTC1) | _BV(CS13);
-				OCR1B = i;
-			}
-			else {
-				/* stop timer and disconnect output, shut down timer to save power */
-				TCCR1 = 0;
-				GTCCR = 0;
-				_delay_us(1);
-				PRR |= _BV(PRTIM1);
-			}
-#endif
-		} else if (config_info[CFG_CFG_ID + 5] == CFG_OUT_PWM) {
-#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
-			if (pack.PIO_Output_Latch_State > 0) {
-				uint8_t i = (pack.PIO_Output_Latch_State & 0xfC) >> 2;
-				/* PWM on PA5 / PIO5 */
-				TCCR1A = _BV(COM1B1) /*| _BV(COM1B0)*/ | _BV(WGM00);
-				TCCR1B = /*_BV(WGM13) | _BV(WGM12) | */ _BV(CS12);
-				OCR1B = i;
-			} else {
-				TCCR1A = 0;
-				TCCR1B = 0;
-			}
-#endif
-		} else {
-			for (i = 0; i < MAX_BTN; i++)
-				if (config_info[CFG_CFG_ID + i] & CFG_OUT_MASK)
-					latch_out(1 << i);
-		}
+		// TODO check standard IO handling with PWM outputs
+		// started via pin timer
+		// TODO setting off via latch must stop timer?
+		for (i = 0; i < MAX_BTN; i++)
+			if (config_info[CFG_CFG_ID + i] & CFG_OUT_MASK)
+				latch_out(1 << i);
 		/* avoid signal generation and let the
 		 latch reset activate it again
 		 */
@@ -765,6 +681,7 @@ void ow_loop()
 		gcontrol &= ~0x02;
 		int_signal = SIG_ARM;
 	}
+#if 0
 	if (gcontrol & 0x4) {
 		cli();
 		stat_to_sample=values[ap];
@@ -781,7 +698,9 @@ void ow_loop()
 		gcontrol &= ~0x08;
 		sei();
 	}
+#endif
 	if (gcontrol & 0x10) {
+		/* this is set when all bytes (22) were received */
 		cli();
 		gcontrol &= ~0x10;
 		/* store crc and once matches the sent one, store eeprom */
@@ -789,7 +708,7 @@ void ow_loop()
 			config_info[CFG_VERS_ID] = MAJ_VERSION;
 			config_info[CFG_VERS_ID + 1] = MIN_VERSION;
 			// saving...
-			eeprom_write_block((const void*)config_info, (void*)7, CFG_VERS_ID - 1);
+			eeprom_update_block((const void*)config_info, (void*)7, CFG_VERS_ID - 1);
 #ifdef DUAL_ROM
 			eeprom_write_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), 22);
 #endif
@@ -798,34 +717,78 @@ void ow_loop()
 		sei();
 		statusPrint();
 	}
+	if (gcontrol & 0x40) {
+		cli();
+		gcontrol &= ~0x40;
+		sei();
+#ifdef TIMER_SUPPORT
+		timed_switch(pin_tmr.type, pin_tmr.val1);
+#endif /* TIMER_SUPPORT */
+	}
 }
 
 void statusPrint()
 {
 #ifdef HAVE_UART
-	struct pinState *p;
-	int i;
 
-	printf ("\n%d %d %d %d\n", TIMSK & (1<<TOIE0), mode, int_signal, btn_active);
-	for (i = 0; i < MAX_BTN; i++) {
+	printf ("\n%d %d %d %d\n", TIMSK & (1<<TOIE0), mode, int_signal, active);
+#if 0
+	struct pinState *p;
+	for (int i = 0; i < MAX_BTN; i++) {
 		p = &btn[i];
 		if (PIN_DDR & pio_map[i]) {
-			printf ("#%i out\n", i+1);
+			printf ("#%i out %d\n", i+1, ((PORT_REG & pio_map[i]) == pio_map[i]));
 		} else {
-			printf ("#%i %d %d\n", i+1, p->state, p->press);
+			printf ("#%i in %d %d\n", i+1, p->state, p->press);
 		}
+		mask = mask << 1;
 	}
+#endif
+	printf("ACT %X LOGIC %X OUT %X DDR %X PORT %X\n", pack.PIO_Activity_Latch_State,
+	       pack.PIO_Logic_State,
+	       pack.PIO_Output_Latch_State, PIN_DDR, PORT_REG);
 #endif
 }
 
-static uint8_t auto_toggle(uint8_t i)
+/**
+ * press 0 for short, 1 for long
+ */
+static void auto_toggle(uint8_t i)
 {
 	uint8_t out;
-	out = config_info[CFG_SW_ID + i];
+	uint8_t cfg = config_info[CFG_SW_ID + i];
+#if defined(TIMER_SUPPORT) || defined(LONGPRESS_AUTO_SUPPORT)
+	uint8_t cfgx = cfg_custom1[CFG_CUSTOM1_SWA0 + i];
+#endif /* TIMER_SUPPORT */
 
-	if (out > 8)
-		return 0;
-
+	/* output 0 or 0xff not configured. */
+	if (cfg == 0xff || cfg == 0)
+		return;
+#ifdef TIMER_SUPPORT
+	/* switch space at 5 */
+	if (cfg & 0x20 && cfgx != 0xff) {
+		/* extended config */
+		// out 0 .. 7
+		out = (cfgx & 0x7) - 1;
+		if (out >= 0 && out < 8) {
+			pin_tmr.pin = out;
+			pin_tmr.val2 = 0xFE;
+			timed_switch(cfgx & 0xf0, cfg_custom1[CFG_CUSTOM1_TM1/* + tmr_nr */]);
+		}
+	}
+#endif /* TIMER_SUPPORT */
+#ifdef LONGPRESS_AUTO_SUPPORT
+	if (config_info[CFG_SW_ID + i] & 0x40 &&
+	    cfg_custom1[CFG_CUSTOM1_SWB0 + i] != 0xff ) {
+	) {
+	}
+#endif /* LONGPRESS_AUTO_SUPPORT*/
+	/* output pin value 1 .. 7, 0 or 0xff not configured.
+	 * For the sake of saving config space auto switching
+	 * pin#8 is not supported */
+	out = cfg & 0x1f;
+	if (out == 0 || out > 8)
+		return;
 	/* return if not valid, not configured or deactivated */
 	out = 1 << (out - 1);
 	// toggle output
@@ -834,11 +797,9 @@ static uint8_t auto_toggle(uint8_t i)
 	else
 		pack.PIO_Output_Latch_State |= out;
 	latch_out(out);
-	// signal not the input, but only the out change
-	return 1;
 }
 
-/* check fo a defined auto switch with "PASS" config and
+/* check for a defined auto switch with "PASS" config and
    switching the configured pin
    returns 0 if no switch configured otherwise 1
 */
@@ -870,12 +831,187 @@ uint8_t auto_switch(uint8_t i, uint8_t val)
 			return 0;
 	}
 	latch_out(out);
-
 	// signal not the input, but only the out change
 	return 1;
 }
 
-uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
+#ifdef TIMER_SUPPORT
+static void timed_switch_stopping();
+static void timed_switch_stop();
+
+/* Start a timer or do related configs
+ * Timer start needs pin_tmr.pin (0..7) and pin_tmr.val2 (level)
+ */
+static void timed_switch(uint8_t type, uint8_t tim)
+{
+	uint8_t out;
+#if MAX_TIMER==1
+	const uint8_t tmr_nr = 0;
+#else
+	// TDOD add more timers
+	// look for available timer
+	uint8_t tmr_nr;
+#endif
+	static uint8_t brightness = 0x80;
+
+	if (type == TMR_TYPE_BRIGHTNESS) {
+		brightness = pin_tmr.val1;
+		return;
+	}
+	if (type == TMR_TYPE_THRESHOLD) {
+		cfg_custom1[0] = 1;
+		cfg_custom1[CFG_CUSTOM1_THR] = pin_tmr.val1;
+		// save in eeprom
+		eeprom_update_block((void*)cfg_custom1, (void*)CFG_CUSTOM1, sizeof(cfg_custom1));
+		return;
+	}
+	if (type == TMR_TYPE_STOP_DIM) {
+		timed_switch_stopping();
+		return;
+	}
+	if (type == TMR_TYPE_STOP) {
+		timed_switch_stop();
+		return;
+	}
+	if (type == 0x44) {
+		// draft experiments
+		int a = analogRead(0);
+		/* A foto transistor to GND and ADC between a voltage divider by half to VCC
+		   min will be half of VCC, so around 0x80 */
+		pack.FF2 = (a >> 2) & 0xFE;
+		//printf("adc= %X round=%d\n", a, pack.FF2);
+	}
+	/* anything else != 0 will trigger a timer */
+	if (type == 0)
+		return;
+	/* if ((type == TMR_TYPE_TRG_DIM_DARK) || (type == TMR_TYPE_TRG_DIM) |
+	    (type == TMR_TYPE_START_DIM_DARK) || (type == TMR_TYPE_TRG_DARK)) */
+	out = 1 << (pin_tmr.pin);
+	if ((type >= TMR_TYPE_TRG_DARK) && (type <= TMR_TYPE_START_DIM_DARK)) {
+		/* check if this is supported by FEAT otherwise 
+			use external setting TMR_TYPE_BRIGHTNESS */
+		if ((config_info[CFG_CFG_FEAT] & FEAT_ADC_LIGHT) == 0) {
+			int a = analogRead(0);
+			brightness = (a >> 2) & 0xFE;
+		}
+		if (brightness < cfg_custom1[CFG_CUSTOM1_THR]) {
+			/* day time */
+			return;
+		}
+	}
+	// TODO check for retrigger (PIR) or switch toggle (TMR_TYPE_START_DIM_DARK)
+	// Button toggle not yet implemented!
+	pack.PIO_Output_Latch_State &= ~out;
+	LED2_ON();
+	if (config_info[CFG_CFG_ID + pin_tmr.pin] == CFG_OUT_PWM) {
+		analogWrite(pio_map[pin_tmr.pin], pin_tmr.val2);
+		pack.PIO_Logic_State &= ~out;
+		latch_state(out);
+		alarmflag = 1;
+		if (int_signal == SIG_ARM)
+			int_signal = SIG_ACT;
+	} else
+		latch_out(out);
+
+	tmr[tmr_nr].lvl = pin_tmr.val2;
+	tmr[tmr_nr].type = type;
+	if(type == TMR_TYPE_ON)
+		return;
+#if MAX_TIMER==1
+	active |= ACT_TIMER1;
+#else
+	//TODO find free timer if more supported
+#endif
+	pack.Status |= 0x20;
+	tmr[tmr_nr].pin = pin_tmr.pin;
+	// TODO not working on tiny???
+	//uint16_t t = tim * cfg_custom1[CFG_CUSTOM1_DIF];
+	tmr[tmr_nr].tmr = millis() + tim * 1000 * 10;
+	statusPrint();
+}
+
+static void timed_switch_stop()
+{
+	uint8_t out;
+#if MAX_TIMER==1
+	const uint8_t tmr_nr = 0;
+
+	active &= ~(ACT_TIMER1 | ACT_DIM_DN1);
+#endif /* MAX_TIMER */
+	tmr[tmr_nr].lvl = 0;
+	out = 1 << (tmr[tmr_nr].pin);
+	pack.PIO_Output_Latch_State |= out;
+	pack.Status &= ~0x60;
+	if (config_info[CFG_CFG_ID + tmr[tmr_nr].pin] == CFG_OUT_PWM) {
+		analogWrite(pio_map[tmr[tmr_nr].pin], 0);
+		pack.PIO_Logic_State &= ~out;
+		latch_state(out);
+		if (int_signal == SIG_ARM && !alarmflag) {
+			int_signal = SIG_ACT;
+			alarmflag = 1;
+		}
+	} else
+		latch_out(out);
+	statusPrint();
+}
+
+/* Dimming down. Check pin config or stored type for support before */
+static void timed_switch_stopping()
+{
+#if MAX_TIMER==1
+	const uint8_t tmr_nr = 0;
+#endif /* MAX_TIMER */
+
+	/* now off */
+	LED2_OFF();
+	if (tmr[tmr_nr].lvl == 0)
+		return;
+	active &= ~ACT_TIMER1;
+	active |= ACT_DIM_DN1;
+	tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];
+	tmr[tmr_nr].lvl--;
+	analogWrite(pio_map[pin_tmr.pin], tmr[tmr_nr].lvl);
+	pack.Status &= ~0x20;
+	pack.Status |= 0x40;
+	if (int_signal == SIG_ARM && !alarmflag) {
+		int_signal = SIG_ACT;
+	 	alarmflag = 1;
+	}
+}
+
+/* for a running timer this function gets called every 1 ms 
+ */
+static void timed_switch_loop()
+{
+#if MAX_TIMER==1
+	const uint8_t tmr_nr = 0;
+#endif /* MAX_TIMER */
+
+	/* timer check */
+	if ((tmr[tmr_nr].tmr == 0 || millis() < tmr[tmr_nr].tmr))
+		return;
+	/* expired */
+	if (active & ACT_TIMER1) {
+		if (tmr[tmr_nr].type == TMR_TYPE_TRG_DIM_DARK ||
+		 tmr[tmr_nr].type == TMR_TYPE_TRG_DIM /*||
+		 tmr[tmr_nr].type == TMR_TYPE_START_DIM_DARK || 
+		 tmr[tmr_nr].type == TMR_TYPE_START_DIM*/) {
+			timed_switch_stopping();
+		 } else
+			timed_switch_stop();
+	}
+	if (active & ACT_DIM_DN1) {
+		tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];
+		if (tmr[tmr_nr].lvl-- == 0) {
+			timed_switch_stop();
+			return;
+		}
+		analogWrite(pio_map[tmr[tmr_nr].pin], tmr[tmr_nr].lvl);
+	}
+}
+#endif /* TIMER_SUPPORT */
+
+static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 {
 	uint8_t act_btns = 0;
 
@@ -891,8 +1027,9 @@ uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 		/* short pressed and done */
 		wdr();
 		pack.FF1 = p->press / 32;
-		if (auto_toggle(i) == 0)
-			act_latch(1, mask);
+		// TODO if long press auto switch supported add press type
+		act_latch(1, mask);
+		auto_toggle(i);
 		break;
 	case BTN_RELEASED:
 		wdr();
@@ -922,8 +1059,11 @@ uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 	 * BTN_PRESS_LOW BTN_INVALID BTN_UNSTABLE BTN_TIMER_HIGH BTN_TIMER_LOW
 	 */
 	case BTN_HIGH:
-		/* means no change */
-		// TODO: break here?? we are done!
+		/* means no change for btn, but signal for switch */
+		if (config_info[CFG_CFG_ID + i] == CFG_SW) {
+			wdr();
+			act_latch(0, mask);
+		}
 		break;
 	default:
 		act_btns |= mask;
@@ -933,7 +1073,7 @@ uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 	return act_btns;
 }
 
-void pin_change_loop()
+static void pin_change_loop()
 {
 	int i;
 	uint8_t pins, in, act_btns, mask = 1;
@@ -945,10 +1085,6 @@ void pin_change_loop()
 	/* go over all buttons and see whether still validation needs to be done,
 	 * otherwise we can go to sleep again (if act_btns = 0) */
 	act_btns = 0;
-	/* mark as handled for now, if another int occurs, we will see it later.
-	 * This is set again after the loop for any outstandng validation or
-	 * overridden by int */
-	btn_active = 0;
 	for (i = 0; i < MAX_BTN; i++) {
 
 		/* ignore outputs and skip unconfigured ones */
@@ -974,6 +1110,7 @@ void pin_change_loop()
 					/* alarm only on rising edge */
 					if (in == 1) {
 						pack.FF1 = 0xff;
+						auto_toggle(i);
 						if ((pack.PIO_Logic_State & mask) == 0)
 							act_latch(1, mask);
 					} else
@@ -991,7 +1128,7 @@ void pin_change_loop()
 				case CFG_PASS_INV:
 				case CFG_PASS_INV_PU:
 					/* filter out disturber */
-					_delay_ms(2);
+					_delay_ms(5);
 					in = !!(PIN_REG & pio_map[i]);
 					/* latch only on change! */
 					if ((in && (pack.PIO_Logic_State & mask) == 0) ||
@@ -1016,13 +1153,14 @@ void pin_change_loop()
 	}
 	if (pack.PIO_Activity_Latch_State && !alarmflag) {
 		alarmflag = 1;
-		pack.Status |= 0x10;
 		/* TODO: check whether to alarm or not */
 		if ((pack.PIO_Activity_Latch_State & signal_cfg) && int_signal == SIG_ARM)
 			int_signal = SIG_ACT;
 	}
 	if (act_btns != 0)
-		btn_active = act_btns;
+		active |= ACT_BUTTON;
+	else
+		active &= ~ACT_BUTTON;
 #ifdef DEBUG
 	if (stPrints-- == 0) {
 		statusPrint();
@@ -1035,28 +1173,31 @@ void loop()
 	ow_loop();
 
 	/* ongoing OW access (in interrupt), serve data with high prio and skip others */
-	if (((TIMSK & (1<<TOIE0)) != 0) || (mode !=0))
+	if (((TIMSK & (1 << TOIE0)) != 0) || (mode != 0))
+
 		return;
 #ifdef DS1820_SUPPORT
 	temp_loop();
 #endif
-	if (btn_active)
+	if (active & ACT_BUTTON)
 		pin_change_loop();
 	if (int_signal == SIG_ACT)
 		owResetSignal();
 	cli();
-	if (btn_active || int_signal == SIG_ACT || TCCR1 != 0) {
+	if (active || int_signal == SIG_ACT || TCCR1 != 0) {
 		sei();
-		if (TCCR1 != 0)
-			wdr();
+		wdr();
 		delay(1);
-	}
-	else {
+#ifdef TIMER_SUPPORT
+		if (active & ACT_TIMER)
+			timed_switch_loop();
+#endif /* TIMER_SUPPORT */
+	} else {
 #if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
 		wdt_disable();
 #endif
 		LED_OFF();
-		OWST_MAIN_END
+		OWST_MAIN_END;
 		if (mode == 0) {
 #ifndef AVRSIM
 			sleep_enable();
@@ -1073,17 +1214,17 @@ void loop()
 	}
 }
 
-#if defined(UNIT_TEST) || defined(AVRSIM)
-int main_func(void)
-#else
+#if !defined(UNIT_TEST) && !defined(AVRSIM)
 int main(void)
-#endif
 {
 	setup();
-
+#ifdef DEBUG
+	statusPrint();
+#endif
 	while (1) {
 		loop();
 	}
 
 	return 0;
 }
+#endif
