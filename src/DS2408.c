@@ -58,6 +58,9 @@
 #ifdef DS1820_SUPPORT
 #include "DS1820.h"
 #endif
+#ifdef DS2450_SUPPORT
+#include "DS2450.h"
+#endif
 
 #define CFG_CUSTOM1 39 // (7 + CFG_TYPE_ID + 9)
 
@@ -572,7 +575,12 @@ static void cfg_init(void)
 #ifdef DUAL_ROM
 	for (int i = 1; i < 7; i++)
 		owid2[i] =  owid[i];
+#ifdef DS1820_SUPPORT
 	owid2[0] = 0x28;
+#endif
+#ifdef DS2450_SUPPORT
+	owid2[0] = 0x20;
+#endif
 	owid2[7] = crc(owid2, 7);
 #endif
 #ifndef AVRSIM
@@ -873,14 +881,6 @@ static void timed_switch(uint8_t type, uint8_t tim)
 		timed_switch_stop();
 		return;
 	}
-	if (type == 0x44) {
-		// draft experiments
-		int a = analogRead(0);
-		/* A foto transistor to GND and ADC between a voltage divider by half to VCC
-		   min will be half of VCC, so around 0x80 */
-		pack.FF2 = (a >> 2) & 0xFE;
-		//printf("adc= %X round=%d\n", a, pack.FF2);
-	}
 	/* anything else != 0 will trigger a timer */
 	if (type == 0)
 		return;
@@ -1178,6 +1178,9 @@ void loop()
 		return;
 #ifdef DS1820_SUPPORT
 	temp_loop();
+#endif
+#ifdef DS2450_SUPPORT
+	adc_loop();
 #endif
 	if (active & ACT_BUTTON)
 		pin_change_loop();
