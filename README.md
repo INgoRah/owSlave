@@ -6,6 +6,11 @@ http://homepage.hispeed.ch/peterfleury/avr-software.html#libs now cloned to
 https://github.com/alx741/avr_i2c.git
 License GPL v3
 ## Changes
+Version 1.8, 2024-11-28
+- Dual DS2450 (ADC) support and minor fixes
+- the cfg read on the custom space seems not to be working yet
+  on dual ROM
+
 Version 1.7, 2024-11-22
 - Timer based switch (supports one timer only)
 - Single Pin configuration message and new custom config space (first byte = 1)
@@ -63,11 +68,11 @@ Version 1.1
 [ ] Dual 2408 with on PCF8473
 [ ] Pin overlay for in and out using all 10 pins (reset and 1-wire not available)
 
-  ## Issues
-  [ ] long press no longer working with outstanding changes
-  [ ] config save does not work sometimes
-  [ ] once setting PIO overides heating override ... fixed by pin change corrections?
-  [ ] If bad signals on the bus or power outage OW ID could be damaged. Needs protection
+## Issues
+[ ] long press no longer working with outstanding changes
+[ ] config save does not work sometimes
+[ ] once setting PIO overides heating override ... fixed by pin change corrections?
+[ ] If bad signals on the bus or power outage OW ID could be damaged. Needs protection
 
   # Documentation
 
@@ -77,16 +82,18 @@ Version 1.1
   See eeprom.py script
 
   ### Configuration Definition
-  CFG [1] default 0xff unused, otherwise pin1 timer default time
-  CFG [2] default 0xff unused, otherwise pin2 timer default time
+  CFG [1] default 0xff unused
+  CFG [2] default 0xff unused
   SWx  [3..10]
     Auto switch an ouput on (short) press of this pin. Output starts with 1 (1 switches PIO0...).
     Example: SW4 = 0x01 switches PI0 on latch 4
     0x80 disables it,
     0x20 timer based switching, look up in custom config space
     0x40 reserved for long press auto switching, look up in custom config space
-  CFGx [11..18]
-  FEA [19] - Feature
+  CFGx [11..18] see CFG_xxx defines
+  FEA [19] - Feature if bit is cleared: 
+    0x1 can do temperature
+    0x2 can do ADC for brightness read
   Reserved [20]
   Version [21..22]
   Type [23]
@@ -95,6 +102,7 @@ Version 1.1
 
 0xC5 | FEAT/PIN | TYPE | VAL1 | VAL2
 read back 16 bit CRC over command and all bytes
+TYPE: see TMR_TYPE_xxx definitions
 VAL1: Time in 10ms or config for non static switch. If 0 use the confiugred default time.
       In case of type E3 (TMR_TYPE_BRIGHTNESS) or E5 (TMR_TYPE_THRESHOLD) 
       brightness or lower threshold value for darkness switching.

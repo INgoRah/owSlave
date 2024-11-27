@@ -657,6 +657,11 @@ void setup()
 #ifdef WITH_LEDS_FLASH
 	led_flash();
 #endif
+	if (pack.Status == 0x88) {
+		/* alarm! */
+		int_signal = SIG_ACT;
+		alarmflag = 1;
+	}
 }
 
 static void ow_loop()
@@ -884,9 +889,17 @@ static void timed_switch(uint8_t type, uint8_t tim)
 	/* anything else != 0 will trigger a timer */
 	if (type == 0)
 		return;
+	out = 1 << (pin_tmr.pin);
+	/* check if pin is already on without timer.
+		* In that case don't start the timer.
+		* If a timer is running retrigger */
+	if ((pack.PIO_Output_Latch_State & out) == 0 &&
+#if MAX_TIMER==1
+		(active & ACT_TIMER1) == 0)
+#endif
+		return;
 	/* if ((type == TMR_TYPE_TRG_DIM_DARK) || (type == TMR_TYPE_TRG_DIM) |
 	    (type == TMR_TYPE_START_DIM_DARK) || (type == TMR_TYPE_TRG_DARK)) */
-	out = 1 << (pin_tmr.pin);
 	if ((type >= TMR_TYPE_TRG_DARK) && (type <= TMR_TYPE_START_DIM_DARK)) {
 		/* check if this is supported by FEAT otherwise 
 			use external setting TMR_TYPE_BRIGHTNESS */
@@ -899,7 +912,6 @@ static void timed_switch(uint8_t type, uint8_t tim)
 			return;
 		}
 	}
-	// TODO check for retrigger (PIR) or switch toggle (TMR_TYPE_START_DIM_DARK)
 	// Button toggle not yet implemented!
 	pack.PIO_Output_Latch_State &= ~out;
 	LED2_ON();

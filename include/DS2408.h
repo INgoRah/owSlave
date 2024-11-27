@@ -32,18 +32,11 @@
 #define PIN_PIO1 _BV(PB0)
 #define PIN_PIO2 _BV(PB2)
 #define PIN_PIO3 _BV(PB3)
-#if defined MAX_BTN >  4
 #define PIN_PIO4 _BV(PB4)
-#endif
-#if defined MAX_BTN >  5
 #define PIN_PIO5 _BV(PB5)
-#endif
-#if defined MAX_BTN >  6
 #define PIN_PIO6 _BV(PB6)
-#endif
-#if defined MAX_BTN >  7
 #define PIN_PIO7 _BV(PB7)
-#endif
+
 #define LED2 _BV(PC3)
 #define LED _BV(PC1)
 
@@ -55,7 +48,7 @@
 #endif
 
 #ifndef MAX_BTN
-#define MAX_BTN 4
+#define MAX_BTN 8
 #endif /* ifndef MAX_BTN */
 #endif /* ATMEGA */
 

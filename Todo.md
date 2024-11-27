@@ -19,8 +19,6 @@ Reduce crc functions
     - config: dim down off global configurable time
 [ ] auto switch on long press (upper bits)
 [ ] detect double or even triple press
-[ ] CRC on pin config
-[ ] check PWM on Tinys
 [ ] Multiple timers
 
 ## Bugs

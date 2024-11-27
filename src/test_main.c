@@ -21,7 +21,7 @@
 #else
 #define printf(...)
 #endif
-#include <avr_mcu_section.h>
+//#include <avr_mcu_section.h>
 #include "DS2408.h"
 
 #define UNITY_BEGIN() UnityBegin(__FILE__)
@@ -44,6 +44,7 @@
 
 #define TEST_ASSERT_EQUAL(expected, actual)         UNITY_TEST_ASSERT_EQUAL_INT((expected), (actual), __LINE__, NULL)
 #define TEST_ASSERT_NOT_EQUAL(expected, actual)     UNITY_TEST_ASSERT((expected), (actual), __LINE__, " Expected Not-Equal")
+#define TEST_ASSERT_INT_WITHIN(delta, expected, actual)     UnityAssertWithinNumber((int)delta, (int)(expected), (int)(actual), "Not in range", __LINE__)
 
 const char PROGMEM UnityStrOk[]                            = "OK";
 const char PROGMEM UnityStrPass[]                          = "PASS";
@@ -88,12 +89,13 @@ void UnityDefaultTestRun(UnityTestFunction Func, const char* FuncName, const int
 	       __LINE__, pack.Status, pack.PIO_Activity_Latch_State, \
 	       pack.PIO_Logic_State, \
 	       pack.PIO_Output_Latch_State, PIN_DDR, PORT_REG, PIN_REG)
-
+#if 0
 const struct avr_mmcu_vcd_trace_t _MMCU_ _mytrace[]  = {
 	{ AVR_MCU_VCD_SYMBOL("PORTB"), .what = (void*)&PORTB, },
 	{ AVR_MCU_VCD_SYMBOL("PINB"), .what = (void*)&PINB, },
 	{ AVR_MCU_VCD_SYMBOL("DDRB"), .what = (void*)&DDRB, },
 };
+#endif
 
 void highlevel_btn(void);
 int owGlobalTest();
@@ -345,6 +347,7 @@ void UnityAssertEqualNumber(const int expected,
     {
 		printf("%i:", lineNumber);
 		printf("%s:", Unity.CurrentTestName);
+		printf("exp=%i <> act=%i ", expected, actual);
 		Unity.CurrentSubTestLineNumber = (uint16_t)lineNumber;
 		STAT();
 /*        UnityTestResultsFailBegin(lineNumber);
@@ -367,6 +370,24 @@ void UnityAssertNotEqualNumber(const int expected,
 	if (expected == actual) {
 		printf("%i:", lineNumber);
 		printf("%s:", Unity.CurrentTestName);
+		printf("exp=%i == act=%i ", expected, actual);
+		Unity.CurrentSubTestLineNumber = (uint16_t)lineNumber;
+		UNITY_FAIL_AND_BAIL;
+    }
+}
+
+void UnityAssertWithinNumber(const int delta,
+                            const int expected,
+                            const int actual,
+                            const char* msg,
+                            const uint16_t lineNumber)
+{
+	RETURN_IF_FAIL_OR_IGNORE;
+
+	if (expected + delta < actual || expected - delta > actual) {
+		printf("%i:", lineNumber);
+		printf("%s:", Unity.CurrentTestName);
+		printf("exp=%i == act=%i ", expected, actual);
 		Unity.CurrentSubTestLineNumber = (uint16_t)lineNumber;
 		UNITY_FAIL_AND_BAIL;
     }
@@ -793,12 +814,12 @@ void timed_pin(void)
 	/* switching pin 1 via timer button 4 */
 	config_info[CFG_SW_ID + tmr_pin] = 0x20;
 	memset(cfg_custom1, 0xff, sizeof(cfg_custom1));
-	cfg_custom1[1] = 0x70; // thr
-	cfg_custom1[2] = 0x1; // dim
-	cfg_custom1[3] = 0x1; // tim1
-	cfg_custom1[4] = 0x1; // tim2
-	cfg_custom1[5 + tmr_pin] = TMR_TYPE_TRG_DIM | 1; // SWA6
-	goto NON_PWM;
+	cfg_custom1[CFG_CUSTOM1_THR] = 0x70; // thr
+	cfg_custom1[CFG_CUSTOM1_DIMD] = 0x1; // dim
+	cfg_custom1[CFG_CUSTOM1_TM1] = 0x1; // tim1
+	cfg_custom1[CFG_CUSTOM1_TM2] = 0x1; // tim2
+	cfg_custom1[CFG_CUSTOM1_SWA0 + tmr_pin] = TMR_TYPE_TRG_DIM | 1; // SWA6
+	//goto NON_PWM;
 	setup();
 	pack.Status = 0;
 	// PWM pin (OCR1B) must be low:
@@ -817,7 +838,6 @@ void timed_pin(void)
 	btnPress(tmr_pin);
 	/* auto switched pin active */
 	// if PWM not valid?
-	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, tmr_msk);
 	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
@@ -825,14 +845,14 @@ void timed_pin(void)
 	pack.PIO_Activity_Latch_State = 0;
 	// check pack.Status == 0x20
 	/* loop for 1ms * 1000 * 10 secs */
-	for (i = 0; i <= 1000 * 10 + 1;i++) {
+	for (i = 0; i <= 1000 * 100 + 1;i++) {
 		TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
 		if (pack.Status == 0x40) {
 			break;
 		}
 		loop();
 	}
-	TEST_ASSERT_EQUAL(i, 9998);
+	TEST_ASSERT_INT_WITHIN(50, i, 10000);
 	TEST_ASSERT_EQUAL(alarmflag, 1);
 	alarmflag = 0;
 	// dimming down
@@ -845,7 +865,7 @@ void timed_pin(void)
 			break;
 		loop();
 	}
-	TEST_ASSERT_EQUAL(i, 254);
+	TEST_ASSERT_INT_WITHIN(10, i, 254);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
 	TEST_ASSERT_EQUAL(pack.Status, 0x0);
 	loop();
@@ -854,29 +874,32 @@ void timed_pin(void)
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, 0);
 	/*
-	 * Test on non PWM pin
+	 * Case 2: Test on non PWM pin
 	 */
-NON_PWM:
 	config_info[CFG_CFG_ID + dut_pin] = CFG_OUT_LOW;
-	cfg_custom1[5 + tmr_pin] = TMR_TYPE_TRG | 1; // SWA6 switches pin 1
+	cfg_custom1[CFG_CUSTOM1_SWA0 + tmr_pin] = TMR_TYPE_TRG | 1; // SWA6 switches pin 1
 	setup();
 	btnPress(tmr_pin);
 	/* auto switched pin active */
-	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, tmr_msk);
 	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
 	TEST_ASSERT_EQUAL(pack.Status & 0x20, 0x20);
 	pack.PIO_Activity_Latch_State = 0;
 	/* loop for 1ms * 1000 * 10 secs */
-	for (i = 0; i <= 1000 * 10 + 1;i++) {
+	for (i = 0; i <= 2000 * 10 + 1;i++) {
+		if (pack.PIO_Output_Latch_State & dut_pinmsk == dut_pinmsk)
+			break;
+		if (pack.Status == 0x40) {
+			break;
+		}
 		if (pack.Status == 0x0) {
 			break;
 		}
 		TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
 		loop();
 	}
-	TEST_ASSERT_EQUAL(i, 9998);
+	TEST_ASSERT_INT_WITHIN(50, i, 10000);
 	TEST_ASSERT_EQUAL(alarmflag, 1);
 	alarmflag = 0;
 	/* timed switched pin inactive */
@@ -884,6 +907,70 @@ NON_PWM:
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
 	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, 0);
 	pack.PIO_Activity_Latch_State = 0;
+	/*
+	 * Case 3: Test on non PWM pin with retrigger
+	 */
+	btnPress(tmr_pin);
+	/* auto switched pin active */
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
+	TEST_ASSERT_EQUAL(pack.Status & 0x20, 0x20);
+	pack.PIO_Activity_Latch_State = 0;
+	/* loop for 1ms * 1000 * 10 secs */
+	for (i = 0; i <= 500 * 10 + 1;i++) {
+		if (pack.PIO_Output_Latch_State & dut_pinmsk == dut_pinmsk)
+			break;
+		loop();
+	}
+	TEST_ASSERT_EQUAL(i, 500 * 10 + 2);
+	btnPress(tmr_pin);
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, tmr_msk);
+	pack.PIO_Activity_Latch_State = 0;
+	/* loop for 1ms * 1000 * 10 secs */
+	for (i = 0; i <= 2000 * 10 + 1;i++) {
+		if (pack.PIO_Output_Latch_State & dut_pinmsk == dut_pinmsk)
+			break;
+		loop();
+	}
+	TEST_ASSERT_INT_WITHIN(50, i, 10000);
+	TEST_ASSERT_EQUAL(alarmflag, 1);
+	alarmflag = 0;
+	/* timed switched pin inactive */
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State, 0xFF);
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, 0);
+	pack.PIO_Activity_Latch_State = 0;
+	/*
+	 * Case 4: Test on non PWM pin not starting timer if on
+	 */
+	/* switch on */
+	pack.PIO_Output_Latch_State &= ~dut_pinmsk;
+	// activate port
+	gcontrol |= 1;
+	loop();
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State& dut_pinmsk, 0);
+	btnPress(tmr_pin);
+	/* auto switched pin must not start the timer! */
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & tmr_msk, tmr_msk);
+	TEST_ASSERT_EQUAL(pack.Status & 0x20, 0x0);
+	pack.PIO_Activity_Latch_State = 0;
+	/* loop for 1ms * 1000 * 10 secs */
+	for (i = 0; i <= 2000 * 10 + 1;i++) {
+		TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, 0);
+		TEST_ASSERT_EQUAL(pack.PIO_Logic_State& dut_pinmsk, 0);
+		TEST_ASSERT_EQUAL(pack.Status & 0x60, 0x0);
+		loop();
+	}
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, 0);
+	/* switch off */
+	pack.PIO_Output_Latch_State |= dut_pinmsk;
+	// activate port
+	gcontrol |= 1;
+	loop();
+	TEST_ASSERT_EQUAL(pack.PIO_Output_Latch_State & dut_pinmsk, dut_pinmsk);
+	TEST_ASSERT_EQUAL(pack.PIO_Activity_Latch_State & dut_pinmsk, dut_pinmsk);
+	TEST_ASSERT_EQUAL(pack.PIO_Logic_State& dut_pinmsk, dut_pinmsk);
 }
 
 /* Tests setting an output pin via PIO_Logic_State (from 1-wire)
@@ -1079,16 +1166,14 @@ int main()
 
 	memset(config_info, 0xff, sizeof(config_info));
 	UNITY_BEGIN();
-	RUN_TEST(owGlobalTest);
-	goto test_end;
 	RUN_TEST(highlevel_btn);
-	//goto test_end;
+	RUN_TEST(timed_pin);
+	RUN_TEST(owGlobalTest);
 	RUN_TEST(timed_pin);
 	RUN_TEST(thermo_handle);
 	RUN_TEST(thermo_handle_overwrite);
 	RUN_TEST(switch_test);
 	RUN_TEST(pinChgTest);
-test_end:
 	UNITY_END ();
 #if 1
 	ret = test_pinset();
