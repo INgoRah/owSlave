@@ -36,6 +36,7 @@
 #define PIN_PIO5 _BV(PB5)
 #define PIN_PIO6 _BV(PB6)
 #define PIN_PIO7 _BV(PB7)
+
 #define LED2 _BV(PC3)
 #define LED _BV(PC1)
 
@@ -47,7 +48,7 @@
 #endif
 
 #ifndef MAX_BTN
-#define MAX_BTN 4
+#define MAX_BTN 8
 #endif /* ifndef MAX_BTN */
 #endif /* ATMEGA */
 
@@ -116,7 +117,7 @@
 #endif
 #endif
 
-#define MIN_VERSION 7
+#define MIN_VERSION 8
 #define MAJ_VERSION 1
 #define CHAN_VALUES 4
 
