@@ -11,6 +11,32 @@ extern uint8_t alarmflag2;
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
 
+/* set watchdog timer (no reset).
+-   must be protected by interrupts
+- WDIE: enable the interrupt instead of a reset
+- WDE: enable the watchdog (should be set by wdt_enable
+*/
+#if defined(__AVR_ATtiny85__)
+#define wdt_tim_enable(value) do { \
+		WDTCR |= _BV(WDIE) | _BV(WDCE); \
+		WDTCR = (value & 0x08 ? _WD_PS3_MASK : 0x00) | (value & 0x7); \
+	}while(0);
+#endif /* __AVR_ATtiny85__ */
+#if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
+#define wdt_tim_enable(value) do { \
+	WDTCSR = (1 << WDCE) | (1 << WDE); \
+	WDTCSR = (value & 0x08 ? _WD_PS3_MASK : 0x00) | (value & 0x7); \
+	WDTCSR |= _BV(WDIE); \
+}while(0);
+#endif /* __AVR_ATtinyx4__ */
+#if  defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__) ||defined(__AVR_ATmega328__) ||defined(__AVR_ATmega328P__) ||defined(__AVR_ATmega328PB__)
+#define wdt_tim_enable(value) do { \
+	WDTCSR = (1 << WDCE) | (1 << WDE); \
+	WDTCSR = (value & 0x08 ? _WD_PS3_MASK : 0x00) | (value & 0x7); \
+	WDTCSR |= _BV(WDIE); \
+}while(0);
+#endif /* __AVR_ATmegax8x__ */
+
 #if defined(__AVR_ATtiny85__)
 #define OWST_INIT_ALL_OFF \
 	PRR|=(1<<PRUSI)|(1<<PRADC);  /*Switch off usi and adc for save Power*/\
@@ -19,6 +45,8 @@ extern void EXTERN_SLEEP(void);
 	PORTB |= ~(1<<PINB2); /*Make PullUp an all Pins but not OW_PIN*/
 
 #define OWST_EN_PULLUP MCUCR &=~(1<<PUD); /*All Pins Pullup...*/
+
+#define CLEAR_FALLING_EDGE MCUCR &= ~(1<<ISC01);
 
 #define OWST_MAIN_END \
 	if (((TIMSK & (1<<TOIE0))==0)&& (mode==0)) {\
@@ -30,6 +58,7 @@ extern void EXTERN_SLEEP(void);
 #define OWST_WDT_ISR
 
 #define OWST_INIT_USI_ON
+
 #endif /* __AVR_ATtiny85__ */
 
 #if  defined(__AVR_ATtiny44__)  || defined(__AVR_ATtiny84__) || defined(__AVR_ATtiny24A__)||defined(__AVR_ATtiny44A__)  || defined(__AVR_ATtiny84A__)
@@ -88,6 +117,9 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 	WDTCSR |= ((1<<WDCE) );   /* Enable the WD Change Bit//| (1<<WDE)*/\
 	WDTCSR |=   (1<<WDIE) |              /* Enable WDT Interrupt*/\
 	(1<<WDP2) | (1<<WDP1);   /*Set Timeout to ~1 seconds*/
+
+
+#define CLEAR_FALLING_EDGE MCUCR &= ~(1<<ISC01);
 
 #define OWST_MAIN_END \
 	if (((TIMSK0 & (1<<TOIE0)) == 0) && mode==0) { \

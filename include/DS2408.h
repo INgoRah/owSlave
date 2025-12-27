@@ -104,11 +104,11 @@
 #define PIN_PIO6 (1<<PINA6)
 #define PIN_PIO7 (1<<PINA7)
 #ifdef WITH_LEDS
-#define LED _BV(PB1)
+#define LED _BV(PA0)
 #define LED2 _BV(PB0)
 
-#define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
-#define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
+#define	LED_ON() do { DDRA |= LED;PORTA &= ~LED; }while(0)
+#define	LED_OFF() do {DDRA &= ~LED;PORTA |= LED; }while(0)
 #define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
 #endif
@@ -117,7 +117,7 @@
 #endif
 #endif
 
-#define MIN_VERSION 8
+#define MIN_VERSION 9
 #define MAJ_VERSION 1
 #define CHAN_VALUES 4
 

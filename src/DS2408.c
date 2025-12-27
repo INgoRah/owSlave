@@ -66,23 +66,6 @@
 
 #define CFG_CUSTOM1 39 // (7 + CFG_TYPE_ID + 9)
 
-/* set watchdog timer (no reset).
--   must be protected by interrupts
-- WDIE: enable the interrupt instead of a reset
-- WDE: enable the watchdog (should be set by wdt_enable
-*/
-#if defined(__AVR_ATtiny85__)
-#define wdt_tim_enable(value) do { \
-		WDTCR |= _BV(WDIE) | _BV(WDCE); \
-		WDTCR = (value & 0x08 ? _WD_PS3_MASK : 0x00) | (value & 0x7); \
-	}while(0);
-#else
-#define wdt_tim_enable(value) do { \
-		WDTCSR = (1 << WDCE) | (1 << WDE); \
-		WDTCSR = (value & 0x08 ? _WD_PS3_MASK : 0x00) | (value & 0x7); \
-		WDTCSR |= _BV(WDIE); \
-	}while(0);
-#endif
 
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
@@ -303,7 +286,7 @@ ISR(WATCHDOG_vect)
 	int_signal = SIG_ACT;
 	alarmflag = 1;
 	/* fire a reset if not handled */
-	wdt_enable(WDTO_1S);
+	wdt_enable(WDTO_60MS);
 }
 #endif /* defined(WDT_ENABLED) && !defined(DS1820_SUPPORT) */
 
@@ -699,16 +682,11 @@ void setup()
 	}
 }
 
-#define RESET_TO 50000
-
 static void ow_loop()
 {
-	static uint16_t to = RESET_TO;
-
 	if (reset_indicator) {
 		// stat_to_sample=0;
 		ap = 0;
-		to = RESET_TO;
 		reset_indicator=0;
 		// TODO: only then enable the alarm signal (arm)
 		int_signal = SIG_ARM;
@@ -757,12 +735,12 @@ static void ow_loop()
 			switch (config_info[2]) {
 				case 0x01:
 					/* soft reset */
-					delay(5500);
+					delay(500);
 					gcontrol &= ~0x10;
 					return;
 				case 0x02:
 					/* soft reset followed by hard reset */
-					delay(7000);
+					delay(1500);
 					gcontrol &= ~0x10;
 					return;
 				case 0xff:
@@ -778,12 +756,17 @@ static void ow_loop()
 		if (config_info[CFG_VERS_ID] == 0x55) {
 			config_info[CFG_VERS_ID] = MAJ_VERSION;
 			config_info[CFG_VERS_ID + 1] = MIN_VERSION;
+			sei();
 			// saving, but exclude the first reserved for CRC
+			wdr();
 			eeprom_update_block((const void*)&config_info[1], (void*)8, CFG_VERS_ID - 1);
 #ifdef DUAL_ROM
+			wdr();
 			eeprom_write_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), 22);
 #endif
+			wdr();
 		}
+		cli();
 		reg_init();
 		sei();
 		statusPrint();
@@ -1256,7 +1239,7 @@ void loop()
 	   a reset and a timeout waiting for futher commands */
 	ow_loop();
 
-	if (((TIMSK & (1 << TOIE0)) != 0) || (mode > OW_SLEEP)) {
+	if ((TIMSK & (1 << TOIE0)) != 0 || mode > 1) {
 		/* ongoing OW access (in interrupt) or
 		waiting for further ROM command,
 		serve data with high prio and skip others.
@@ -1264,7 +1247,6 @@ void loop()
 		*/
 		return;
 	}
-	wdr();
 #ifdef DS1820_SUPPORT
 	temp_loop();
 #endif
@@ -1278,32 +1260,38 @@ void loop()
 	cli();
 	if (active || int_signal == SIG_ACT || TCCR1 != 0) {
 		sei();
+		wdr();
 		delay(1);
 #ifdef TIMER_SUPPORT
 		if (active & ACT_TIMER)
 			timed_switch_loop();
 #endif /* TIMER_SUPPORT */
-	} else {
-#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
-		wdt_disable();
-#endif
-		LED_OFF();
-		OWST_MAIN_END;
-		if (mode == OW_SLEEP) {
-#ifndef AVRSIM
-			sleep_enable();
-			sei();
-			sleep_cpu();
-			sleep_disable();
-#endif
-		}
-		sei();
-#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
-		//wdt_enable(WDTO_4S);
-		wdt_tim_enable(WDTO_4S);
-#endif
-		LED_ON();
+		return;
 	}
+#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+	wdt_disable();
+#endif
+	sei();
+	LED_OFF();
+	if (((TIMSK & _BV(TOIE0)) == 0) && mode < 2) {
+		/* no activity, prepare for sleep */
+		if (mode == OW_SLEEP)
+			set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+		else
+			set_sleep_mode(SLEEP_MODE_IDLE);
+		/* in sleep mode the device wakes up only with a level interrupt */
+		MCUCR &= ~_BV(ISC01);
+#ifndef AVRSIM
+		sleep_mode();
+#endif
+	}
+	sei();
+	LED_ON();
+#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+	cli();
+	wdt_tim_enable(WDTO_1S);
+	sei();
+#endif
 }
 
 #if !defined(UNIT_TEST) && !defined(AVRSIM)
