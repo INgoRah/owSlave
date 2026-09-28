@@ -23,7 +23,11 @@ void adc_loop()
 			return;
 		wdt_reset();
 		/* got a start conversion command, force update */
-		packadc.ch[idx] = analogRead(idx);
+		if (idx == 0)
+			packadc.ch[idx] = 1234;
+		else
+			packadc.ch[idx] = analogRead(idx);
 	}
+	packadc.ch[0] = 1234;
 }
 #endif /* DS2450_SUPPORT */

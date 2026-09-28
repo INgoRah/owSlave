@@ -447,16 +447,19 @@ OWINIT:
 	ret
 
 
+; Called from C: abort any ongoing 1-Wire transaction and put the
+; protocol state machine back to OW_SLEEP (ignore bus until next reset).
+; Returns with interrupts enabled, even if called with them disabled.
 .global EXTERN_SLEEP
 EXTERN_SLEEP:
-	cli
-	push r_temp
+	cli ; no pin/timer interrupt may see a half reset state
+	push r_temp ; r_temp (r16) is call-saved in the C ABI
 	ldi r_temp,0
-	sts mode,r_temp ;SLEEP
-	sts gcontrol,r_temp
-	sts sendflag,r_temp
-	sts bcount,r_temp
-	RESETZEROMARKER
+	sts mode,r_temp ;SLEEP: next bits are ignored until a reset
+	sts gcontrol,r_temp ; drop pending requests to the C main loop
+	sts sendflag,r_temp ; receive, never drive a stale byte onto the bus
+	sts bcount,r_temp ; no bits left of the current byte
+	RESETZEROMARKER ; do not pull the line low on the next falling edge
 	pop r_temp
 	sei
 	ret

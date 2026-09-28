@@ -48,7 +48,15 @@
 #include "dht22.h"
 #endif
 
-/* must be protected by interrupts */
+/* Use the watchdog as 8 s wake up timer: interrupt only, NO reset.
+ * - wdt_reset(): restart the counter
+ * - clear WDRF, otherwise WDE is forced on (and a reset would follow)
+ * - timed sequence: WDCE | WDE allows changing WDE and prescaler
+ *   within the next 4 cycles, so this must be protected by interrupts
+ * - write WDP3 | WDP0 (8 s) with WDE = 0: reset mode is switched off
+ * - WDIE = 1: interrupt mode. As WDE = 0, WDIE is not cleared by
+ *   hardware and the interrupt fires every 8 s until disabled.
+ */
 #define wdt_tim_enable() do { \
 		wdt_reset(); \
 		MCUSR &= ~(_BV(WDRF)); \

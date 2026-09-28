@@ -226,7 +226,7 @@
 #define CFG_PIN_DEF 0xff
 
 /* Defines for timed triggers and pin auto timer (upper 5 bits)
- * Auto switches always uses a configured default time 
+ * Auto switches always uses a configured default time
  * in CFG_PIN1_TMR or CFG_PIN2_TMR.
  */
 /** Trigger (or retrigger) if dark.
@@ -320,7 +320,7 @@ typedef union
 		uint8_t ch : 2;
 		/** For future use */
 		uint8_t feat : 3;
-		/** Time in 10ms or config for non static switch. 
+		/** Time in 10ms or config for non static switch.
 		 *  If 0 use the confiugred default time */
 		uint8_t val1;
 		/** Level for PWM outputs or 0xaa in case of config */

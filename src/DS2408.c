@@ -63,6 +63,9 @@
 #endif
 
 #define OW_SLEEP 0
+/* bus idle timeout (in ~10 us loop steps) after which an unfinished
+   OW transaction is dropped and mode set back to OW_SLEEP: ~100 ms */
+#define OW_IDLE_TO 10000
 
 #define CFG_CUSTOM1 39 // (7 + CFG_TYPE_ID + 9)
 
@@ -160,6 +163,17 @@ uint8_t int_signal;
  * x: timer running
  */
 volatile uint8_t active = 0;
+
+/* modify active from main context: PCINT0_vect sets ACT_BUTTON,
+   a plain read-modify-write could lose that bit */
+static inline void active_mod(uint8_t clr, uint8_t set)
+{
+	uint8_t sreg = SREG;
+
+	cli();
+	active = (active & ~clr) | set;
+	SREG = sreg;
+}
 #ifdef WITH_LEDS
 static uint8_t led2 = 0;
 #endif
@@ -205,6 +219,13 @@ unsigned long millis()
 {
 	return _ms;
 }
+
+#ifdef TIMER_SUPPORT
+static unsigned long secs()
+{
+	return _ms / 1000;
+}
+#endif
 
 void delay(unsigned long ms)
 {
@@ -279,6 +300,9 @@ ISR(WATCHDOG_vect)
 	// store variables for debugging
 	pack.FF1 = mode;
 	pack.FF2 = 0x80 | active;
+	gcontrol = 0;
+	// stop timer
+	TIMSK &= ~(1<<TOIE0);
 	// call reset, but keep port states
 	active = 0;
 	mode = 0;
@@ -286,7 +310,7 @@ ISR(WATCHDOG_vect)
 	int_signal = SIG_ACT;
 	alarmflag = 1;
 	/* fire a reset if not handled */
-	wdt_enable(WDTO_60MS);
+	wdt_enable(WDTO_250MS);
 }
 #endif /* defined(WDT_ENABLED) && !defined(DS1820_SUPPORT) */
 
@@ -779,18 +803,6 @@ static void ow_loop()
 		timed_switch(pin_tmr.type, pin_tmr.val1);
 #endif /* TIMER_SUPPORT */
 	}
-#if 0
-	if (mode != OW_SLEEP && (TIMSK & _BV(TOIE0)) == 0) {
-		/* count down if request is comming */
-		_delay_us(5);
-		if (to-- == 0) {
-			/* coming here means no further ROM
-			request within 100 ms, so we can sleep */
-			mode = OW_SLEEP;
-			to = RESET_TO;
-		}
-	}
-#endif
 }
 
 void statusPrint()
@@ -910,6 +922,7 @@ static void timed_switch_stop();
  */
 static void timed_switch(uint8_t type, uint8_t tim)
 {
+	uint16_t t;
 	uint8_t out;
 #if MAX_TIMER==1
 	const uint8_t tmr_nr = 0;
@@ -983,15 +996,14 @@ static void timed_switch(uint8_t type, uint8_t tim)
 	if(type == TMR_TYPE_ON)
 		return;
 #if MAX_TIMER==1
-	active |= ACT_TIMER1;
+	active_mod(0, ACT_TIMER1);
 #else
 	//TODO find free timer if more supported
 #endif
 	pack.Status |= 0x20;
 	tmr[tmr_nr].pin = pin_tmr.pin;
-	// TODO not working on tiny???
-	//uint16_t t = tim * cfg_custom1[CFG_CUSTOM1_DIF];
-	tmr[tmr_nr].tmr = millis() + tim * 1000 * 10;
+	t = tim * cfg_custom1[CFG_CUSTOM1_DIF];
+	tmr[tmr_nr].tmr = secs() + t;
 	statusPrint();
 }
 
@@ -1001,7 +1013,7 @@ static void timed_switch_stop()
 #if MAX_TIMER==1
 	const uint8_t tmr_nr = 0;
 
-	active &= ~(ACT_TIMER1 | ACT_DIM_DN1);
+	active_mod(ACT_TIMER1 | ACT_DIM_DN1, 0);
 #endif /* MAX_TIMER */
 	tmr[tmr_nr].lvl = 0;
 	out = 1 << (tmr[tmr_nr].pin);
@@ -1031,8 +1043,7 @@ static void timed_switch_stopping()
 	LED2_OFF();
 	if (tmr[tmr_nr].lvl == 0)
 		return;
-	active &= ~ACT_TIMER1;
-	active |= ACT_DIM_DN1;
+	active_mod(ACT_TIMER1, ACT_DIM_DN1);
 	tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];
 	tmr[tmr_nr].lvl--;
 	analogWrite(pio_map[pin_tmr.pin], tmr[tmr_nr].lvl);
@@ -1053,8 +1064,17 @@ static void timed_switch_loop()
 #endif /* MAX_TIMER */
 
 	/* timer check */
-	if ((tmr[tmr_nr].tmr == 0 || millis() < tmr[tmr_nr].tmr))
+	if (tmr[tmr_nr].tmr == 0)
 		return;
+	if (active & ACT_DIM_DN1) {
+		/* should be
+		if (millis() - startTime >= duration)
+		*/
+		if (millis() < tmr[tmr_nr].tmr)
+			return;
+	} else if (secs() < tmr[tmr_nr].tmr) {
+		return;
+	}
 	/* expired */
 	if (active & ACT_TIMER1) {
 		if (tmr[tmr_nr].type == TMR_TYPE_TRG_DIM_DARK ||
@@ -1090,14 +1110,12 @@ static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 		break;
 	case BTN_PRESSED:
 		/* short pressed and done */
-		wdr();
 		pack.FF1 = p->press / 32;
 		// TODO if long press auto switch supported add press type
 		act_latch(1, mask);
 		auto_toggle(i);
 		break;
 	case BTN_RELEASED:
-		wdr();
 		/* long pressed done for push buttons or
 			toggled the switch */
 		pack.FF1 = p->press / 32;
@@ -1108,16 +1126,20 @@ static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 		 * for push buttons.
 		 * Switch should go to sleep
 		 */
-		if (config_info[CFG_CFG_ID + i] == CFG_SW) {
-			wdr();
+		if (config_info[CFG_CFG_ID + i] == CFG_SW)
 			act_latch(0, mask);
-		} else
+		else
 			act_btns |= mask;
 		break;
 	case BTN_LOW:
 		/* waiting for release for push buttons.
-			In case of non push button we are done here */
-		if (config_info[CFG_CFG_ID + i] == CFG_BTN)
+			In case of non push button we are done here.
+			Once the long press is signaled, sleep and let the
+			pin change wake us on release, so a stuck pin does
+			not keep us awake. Note: millis() does not count
+			while sleeping, the long press time gets too short. */
+		if (config_info[CFG_CFG_ID + i] == CFG_BTN &&
+		    p->hl_state != BTN_PRESSED_LONG)
 			act_btns |= mask;
 		break;
 	/* Internal and intermediate state are ongoing evaluations
@@ -1125,10 +1147,8 @@ static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 	 */
 	case BTN_HIGH:
 		/* means no change for btn, but signal for switch */
-		if (config_info[CFG_CFG_ID + i] == CFG_SW) {
-			wdr();
+		if (config_info[CFG_CFG_ID + i] == CFG_SW)
 			act_latch(0, mask);
-		}
 		break;
 	default:
 		act_btns |= mask;
@@ -1146,6 +1166,9 @@ static void pin_change_loop()
 	static int stPrints = 50;
 #endif
 
+	/* clear before sampling, a pin change afterwards sets it again
+	   and we get called once more */
+	active_mod(ACT_BUTTON, 0);
 	pins = PIN_REG;
 	/* go over all buttons and see whether still validation needs to be done,
 	 * otherwise we can go to sleep again (if act_btns = 0) */
@@ -1223,9 +1246,7 @@ static void pin_change_loop()
 			int_signal = SIG_ACT;
 	}
 	if (act_btns != 0)
-		active |= ACT_BUTTON;
-	else
-		active &= ~ACT_BUTTON;
+		active_mod(0, ACT_BUTTON);
 #ifdef DEBUG
 	if (stPrints-- == 0) {
 		statusPrint();
@@ -1235,18 +1256,38 @@ static void pin_change_loop()
 
 void loop()
 {
-	/* this sets mode = OW_SLEEP after
-	   a reset and a timeout waiting for futher commands */
+	static uint16_t ow_idle = 0;
+
 	ow_loop();
 
-	if ((TIMSK & (1 << TOIE0)) != 0 || mode > 1) {
-		/* ongoing OW access (in interrupt) or
-		waiting for further ROM command,
+	if ((TIMSK & (1 << TOIE0)) != 0) {
+		/* ongoing OW access (in interrupt),
 		serve data with high prio and skip others.
 		Note: watchdog not reset intentionally!
 		*/
+		ow_idle = 0;
 		return;
 	}
+	if (mode != OW_SLEEP) {
+		/* waiting for further ROM / function command or data.
+		The master may stop at any time (e.g. a reset only for
+		presence detection), so drop the transaction after a bus
+		idle timeout. Otherwise we never power down, cannot send
+		an alarm signal and (mode > 1) run into the watchdog. */
+		if (ow_idle++ < OW_IDLE_TO) {
+			_delay_us(10);
+			return;
+		}
+		cli();
+		if ((TIMSK & (1 << TOIE0)) != 0) {
+			/* bus activity started meanwhile */
+			sei();
+			return;
+		}
+		/* mode = OW_SLEEP, reset bit state, enables interrupts */
+		EXTERN_SLEEP();
+	}
+	ow_idle = 0;
 #ifdef DS1820_SUPPORT
 	temp_loop();
 #endif
