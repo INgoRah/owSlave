@@ -1335,6 +1335,11 @@ void loop()
 	static uint16_t ow_idle = 0;
 
 	ow_loop();
+#ifdef DS2450_SUPPORT
+	/* short (< 1 ms), so serve a convert request right away like the
+	   ow_loop() requests: the master may read the result directly after */
+	adc_loop();
+#endif
 
 	if ((TIMSK & (1 << TOIE0)) != 0) {
 		/* ongoing OW access (in interrupt),
@@ -1366,9 +1371,6 @@ void loop()
 	ow_idle = 0;
 #ifdef DS1820_SUPPORT
 	temp_loop();
-#endif
-#ifdef DS2450_SUPPORT
-	adc_loop();
 #endif
 	if (active & ACT_BUTTON)
 		pin_change_loop();
