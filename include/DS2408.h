@@ -278,6 +278,9 @@
 #define CFG_CUSTOM1_SWA0 7 /* .. SWA7 = 14*/
 /* Not yet supported */
 #define CFG_CUSTOM1_SWB0 CFG_CUSTOM1_SWA0 + 8
+/* bytes of cfg_custom1 in EEPROM, = CFG_CUSTOM1_LEN in OWConfig.s.
+   In RAM one more: byte 22 of a config write (type 1), 0x55 saves */
+#define CFG_CUSTOM1_LEN 22
 
 typedef union {
 	volatile uint8_t bytes[0x20];

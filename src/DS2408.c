@@ -86,7 +86,7 @@ static void var_init(void);
 static void cfg_init(void);
 static void auto_toggle(uint8_t i);
 #ifdef TIMER_SUPPORT
-static void timed_switch(uint8_t type, uint8_t tim);
+static void timed_switch(uint8_t type, uint8_t tim, uint8_t src);
 #endif /* TIMER_SUPPORT */
 void statusPrint();
 static void pin_set(uint8_t p, uint8_t id, uint8_t bb);
@@ -136,14 +136,21 @@ uint8_t config_info2[8];
 #endif
 #ifdef TIMER_SUPPORT
 volatile pin_t pin_tmr;
-uint8_t cfg_custom1[22];
+/* + 1: byte 22 of a custom config write, 0x55 = save to EEPROM */
+uint8_t cfg_custom1[CFG_CUSTOM1_LEN + 1];
 uint8_t cfg_type;
 
 struct {
 	unsigned long tmr;
 	uint8_t pin;
 	uint8_t lvl;
+	/* level set at start, lvl gets decremented while dimming down */
+	uint8_t lvl_on;
 	uint8_t type;
+	/* input which triggered the timer, 0xff if none (OW command) */
+	uint8_t src;
+	/* on time in s, to restart while the trigger input is active */
+	uint16_t dur;
 }tmr[MAX_TIMER];
 #endif /* TIMER_SUPPORT */
 
@@ -509,6 +516,7 @@ static void var_init(void)
 		initBtn(1, &btn[i]);
 #ifdef TIMER_SUPPORT
 	tmr[0].lvl = 0;
+	tmr[0].src = 0xff;
 #endif
 	pack.PIO_Activity_Latch_State = 0;
 	/* enable alarm state reporting */
@@ -653,7 +661,7 @@ static void cfg_init(void)
 		sizeof(config_info2));
 #endif
 #ifdef TIMER_SUPPORT
-	eeprom_read_block((void*)&cfg_custom1, (const void*)CFG_CUSTOM1, sizeof(cfg_custom1));
+	eeprom_read_block((void*)&cfg_custom1, (const void*)CFG_CUSTOM1, CFG_CUSTOM1_LEN);
 #endif /* TIMEOUT_SUPPORT */
 #endif
 	config_info[CFG_VERS_ID] = MAJ_VERSION;
@@ -706,7 +714,7 @@ void setup()
 			wdt_restore = 1;
 			pack.Status = 0x08;
 		} else
-		pack.Status = 0x88;
+			pack.Status = 0x88;
 		/* use only once */
 		wdt_save.chk = ~wdt_save_chk();
 #else
@@ -811,6 +819,22 @@ static void ow_loop()
 #endif
 	if (gcontrol & 0x10) {
 		/* this is set when all bytes (22) were received */
+#ifdef TIMER_SUPPORT
+		if (cfg_type == 1) {
+			/* custom config (written into cfg_custom1), the pins
+			   are not affected. Byte 22 = 0x55 saves it */
+			cli();
+			gcontrol &= ~0x10;
+			sei();
+			if (cfg_custom1[CFG_CUSTOM1_LEN] == 0x55) {
+				cfg_custom1[CFG_CUSTOM1_LEN] = 0;
+				wdr();
+				eeprom_update_block((const void*)cfg_custom1, (void*)CFG_CUSTOM1, CFG_CUSTOM1_LEN);
+				wdr();
+			}
+			return;
+		}
+#endif /* TIMER_SUPPORT */
 		if (config_info[0] == 0xde &&
 		    config_info[1] == 0xad) {
 			switch (config_info[2]) {
@@ -818,7 +842,6 @@ static void ow_loop()
 					/* soft reset: let the watchdog interrupt fire */
 				case 0x02:
 					/* soft reset followed by hard reset */
-					delay(1500);
 					gcontrol &= ~0x10;
 #if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
 				{
@@ -838,8 +861,9 @@ static void ow_loop()
 				   or forced, if the watchdog was not running yet */
 				wdt_enable(WDTO_250MS);
 				while(1);
+#else
+				return;
 #endif
-					return;
 				case 0xff:
 					/* hard reset, do not restore outputs */
 #ifdef WDT_SAVE
@@ -862,7 +886,7 @@ static void ow_loop()
 			eeprom_update_block((const void*)&config_info[1], (void*)8, CFG_VERS_ID - 1);
 #ifdef DUAL_ROM
 			wdr();
-			eeprom_write_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), 22);
+			eeprom_update_block((const void*)config_info2, (void*)(8 + CFG_TYPE_ID), sizeof(config_info2));
 #endif
 			wdr();
 		}
@@ -876,7 +900,7 @@ static void ow_loop()
 		gcontrol &= ~0x40;
 		sei();
 #ifdef TIMER_SUPPORT
-		timed_switch(pin_tmr.type, pin_tmr.val1);
+		timed_switch(pin_tmr.type, pin_tmr.val1, 0xff);
 #endif /* TIMER_SUPPORT */
 	}
 }
@@ -926,8 +950,9 @@ static void auto_toggle(uint8_t i)
 		out = (cfgx & 0x7) - 1;
 		if (out >= 0 && out < 8) {
 			pin_tmr.pin = out;
-			pin_tmr.val2 = 0xFE;
-			timed_switch(cfgx & 0xf0, cfg_custom1[CFG_CUSTOM1_TM1/* + tmr_nr */]);
+			/* no level: full on or keep the running one */
+			pin_tmr.val2 = 0;
+			timed_switch(cfgx & 0xf0, cfg_custom1[CFG_CUSTOM1_TM1/* + tmr_nr */], i);
 		}
 	}
 #endif /* TIMER_SUPPORT */
@@ -995,11 +1020,12 @@ static void timed_switch_stop();
 
 /* Start a timer or do related configs
  * Timer start needs pin_tmr.pin (0..7) and pin_tmr.val2 (level)
+ * src: triggering input (0..7) or 0xff if not triggered by an input
  */
-static void timed_switch(uint8_t type, uint8_t tim)
+static void timed_switch(uint8_t type, uint8_t tim, uint8_t src)
 {
 	uint16_t t;
-	uint8_t out;
+	uint8_t out, lvl;
 #if MAX_TIMER==1
 	const uint8_t tmr_nr = 0;
 #else
@@ -1017,7 +1043,7 @@ static void timed_switch(uint8_t type, uint8_t tim)
 		cfg_custom1[0] = 1;
 		cfg_custom1[CFG_CUSTOM1_THR] = pin_tmr.val1;
 		// save in eeprom
-		eeprom_update_block((void*)cfg_custom1, (void*)CFG_CUSTOM1, sizeof(cfg_custom1));
+		eeprom_update_block((void*)cfg_custom1, (void*)CFG_CUSTOM1, CFG_CUSTOM1_LEN);
 		return;
 	}
 	if (type == TMR_TYPE_STOP_DIM) {
@@ -1034,15 +1060,20 @@ static void timed_switch(uint8_t type, uint8_t tim)
 	out = 1 << (pin_tmr.pin);
 	/* check if pin is already on without timer.
 		* In that case don't start the timer.
-		* If a timer is running retrigger */
-	if ((pack.PIO_Output_Latch_State & out) == 0 &&
+		* If a timer is running retrigger.
+		* A plain on always applies, it may change the level */
+	if (type != TMR_TYPE_ON &&
+		(pack.PIO_Output_Latch_State & out) == 0 &&
 #if MAX_TIMER==1
-		(active & ACT_TIMER1) == 0)
+		(active & ACT_TIMER1_ALL) == 0)
 #endif
 		return;
 	/* if ((type == TMR_TYPE_TRG_DIM_DARK) || (type == TMR_TYPE_TRG_DIM) |
-	    (type == TMR_TYPE_START_DIM_DARK) || (type == TMR_TYPE_TRG_DARK)) */
-	if ((type >= TMR_TYPE_TRG_DARK) && (type <= TMR_TYPE_START_DIM_DARK)) {
+	    (type == TMR_TYPE_START_DIM_DARK) || (type == TMR_TYPE_TRG_DARK))
+	   Only check on a fresh start, a running timer (light on) retriggers
+	   regardless of brightness */
+	if ((type >= TMR_TYPE_TRG_DARK) && (type <= TMR_TYPE_START_DIM_DARK) &&
+	    (active & ACT_TIMER1_ALL) == 0) {
 		/* check if this is supported by FEAT otherwise
 			use external setting TMR_TYPE_BRIGHTNESS */
 		if ((config_info[CFG_CFG_FEAT] & FEAT_ADC_LIGHT) == 0) {
@@ -1054,11 +1085,16 @@ static void timed_switch(uint8_t type, uint8_t tim)
 			return;
 		}
 	}
+	lvl = pin_tmr.val2;
+	if (lvl == 0)
+		/* no level given: reapply the level of a running
+		   (maybe dimming down) timer, otherwise full on */
+		lvl = (active & ACT_TIMER1_ALL) ? tmr[tmr_nr].lvl_on : 0xFE;
 	// Button toggle not yet implemented!
 	pack.PIO_Output_Latch_State &= ~out;
 	LED2_ON();
 	if (config_info[CFG_CFG_ID + pin_tmr.pin] == CFG_OUT_PWM) {
-		analogWrite(pio_map[pin_tmr.pin], pin_tmr.val2);
+		analogWrite(pio_map[pin_tmr.pin], lvl);
 		pack.PIO_Logic_State &= ~out;
 		latch_state(out);
 		alarmflag = 1;
@@ -1067,18 +1103,23 @@ static void timed_switch(uint8_t type, uint8_t tim)
 	} else
 		latch_out(out);
 
-	tmr[tmr_nr].lvl = pin_tmr.val2;
+	tmr[tmr_nr].lvl = lvl;
+	tmr[tmr_nr].lvl_on = lvl;
 	tmr[tmr_nr].type = type;
 	if(type == TMR_TYPE_ON)
 		return;
 #if MAX_TIMER==1
-	active_mod(0, ACT_TIMER1);
+	/* a retrigger while dimming down continues with the timer */
+	active_mod(ACT_DIM_DN1, ACT_TIMER1);
 #else
 	//TODO find free timer if more supported
 #endif
+	pack.Status &= ~0x40;
 	pack.Status |= 0x20;
 	tmr[tmr_nr].pin = pin_tmr.pin;
+	tmr[tmr_nr].src = src;
 	t = tim * cfg_custom1[CFG_CUSTOM1_DIF];
+	tmr[tmr_nr].dur = t;
 	tmr[tmr_nr].tmr = secs() + t;
 	statusPrint();
 }
@@ -1122,13 +1163,23 @@ static void timed_switch_stopping()
 	active_mod(ACT_TIMER1, ACT_DIM_DN1);
 	tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];
 	tmr[tmr_nr].lvl--;
-	analogWrite(pio_map[pin_tmr.pin], tmr[tmr_nr].lvl);
+	analogWrite(pio_map[tmr[tmr_nr].pin], tmr[tmr_nr].lvl);
 	pack.Status &= ~0x20;
 	pack.Status |= 0x40;
 	if (int_signal == SIG_ARM && !alarmflag) {
 		int_signal = SIG_ACT;
 	 	alarmflag = 1;
 	}
+}
+
+/* trigger input still active, e.g. a PIR holding its output high
+   while there is motion. Only active high inputs, they give no new
+   edge for a retrigger as long as they stay high. */
+static uint8_t timed_switch_src_active(uint8_t src)
+{
+	if (src >= MAX_BTN || config_info[CFG_CFG_ID + src] != CFG_ACT_HIGH)
+		return 0;
+	return (PIN_REG & pio_map[src]) != 0;
 }
 
 /* for a running timer this function gets called every 1 ms
@@ -1153,13 +1204,24 @@ static void timed_switch_loop()
 	}
 	/* expired */
 	if (active & ACT_TIMER1) {
-		if (tmr[tmr_nr].type == TMR_TYPE_TRG_DIM_DARK ||
+		if (timed_switch_src_active(tmr[tmr_nr].src)) {
+			/* restart, switch off only after the input went inactive */
+			tmr[tmr_nr].tmr = secs() + tmr[tmr_nr].dur;
+			return;
+		}
+		/* dim down only PWM outputs with a level left, otherwise
+		   stopping would not change anything and we stay expired */
+		if ((tmr[tmr_nr].type == TMR_TYPE_TRG_DIM_DARK ||
 		 tmr[tmr_nr].type == TMR_TYPE_TRG_DIM /*||
 		 tmr[tmr_nr].type == TMR_TYPE_START_DIM_DARK ||
-		 tmr[tmr_nr].type == TMR_TYPE_START_DIM*/) {
+		 tmr[tmr_nr].type == TMR_TYPE_START_DIM*/) &&
+		 config_info[CFG_CFG_ID + tmr[tmr_nr].pin] == CFG_OUT_PWM &&
+		 tmr[tmr_nr].lvl != 0) {
+			/* does the first dim step already */
 			timed_switch_stopping();
 		 } else
 			timed_switch_stop();
+		return;
 	}
 	if (active & ACT_DIM_DN1) {
 		tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];

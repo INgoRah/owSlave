@@ -281,8 +281,12 @@ h_fwconfiginfo_end:
 	cpi r_temp, 1
 	; no, so default config_info
 	brne h_fw_r_def_config_info
-	; yes: read custom config
-	configZ cfg_custom1,r_bytep
+	; yes: read custom config, 0xff past it
+	cpi r_bytep,CFG_CUSTOM1_LEN+1
+	brlo 1f
+	ldi r_rwbyte,0xff
+	rjmp handle_end_inc
+1:	configZ cfg_custom1,r_bytep
 	rjmp h_fw_r_custom_cfg
 
 h_fw_r_def_config_info:
@@ -456,7 +460,8 @@ EXTERN_SLEEP:
 	push r_temp ; r_temp (r16) is call-saved in the C ABI
 	ldi r_temp,0
 	sts mode,r_temp ;SLEEP: next bits are ignored until a reset
-	sts gcontrol,r_temp ; drop pending requests to the C main loop
+	; keep gcontrol: its requests are complete commands (CRC sent),
+	; dropping them loses e.g. a convert request on the idle timeout
 	sts sendflag,r_temp ; receive, never drive a stale byte onto the bus
 	sts bcount,r_temp ; no bits left of the current byte
 	RESETZEROMARKER ; do not pull the line low on the next falling edge
