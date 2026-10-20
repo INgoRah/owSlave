@@ -104,11 +104,11 @@
 #define PIN_PIO6 (1<<PINA6)
 #define PIN_PIO7 (1<<PINA7)
 #ifdef WITH_LEDS
-#define LED _BV(PB1)
+#define LED _BV(PA0)
 #define LED2 _BV(PB0)
 
-#define	LED_ON() do { DDRB |= LED;PORTB &= ~LED; }while(0)
-#define	LED_OFF() do {DDRB &= ~LED;PORTB |= LED; }while(0)
+#define	LED_ON() do { DDRA |= LED;PORTA &= ~LED; }while(0)
+#define	LED_OFF() do {DDRA &= ~LED;PORTA |= LED; }while(0)
 #define	LED2_ON() do { DDRB |= LED2;PORTB &= ~LED2; led2=1; }while(0)
 #define	LED2_OFF() do {DDRB &= ~LED2;PORTB |= LED2; led2=0; }while(0)
 #endif
@@ -117,7 +117,7 @@
 #endif
 #endif
 
-#define MIN_VERSION 8
+#define MIN_VERSION 9
 #define MAJ_VERSION 1
 #define CHAN_VALUES 4
 
@@ -226,7 +226,7 @@
 #define CFG_PIN_DEF 0xff
 
 /* Defines for timed triggers and pin auto timer (upper 5 bits)
- * Auto switches always uses a configured default time 
+ * Auto switches always uses a configured default time
  * in CFG_PIN1_TMR or CFG_PIN2_TMR.
  */
 /** Trigger (or retrigger) if dark.
@@ -320,7 +320,7 @@ typedef union
 		uint8_t ch : 2;
 		/** For future use */
 		uint8_t feat : 3;
-		/** Time in 10ms or config for non static switch. 
+		/** Time in 10ms or config for non static switch.
 		 *  If 0 use the confiugred default time */
 		uint8_t val1;
 		/** Level for PWM outputs or 0xaa in case of config */

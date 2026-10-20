@@ -35,27 +35,27 @@
 TIMER_INTERRUPT:
 	sdb
 	push r_temp
-	in r_temp,_SFR_IO_ADDR(SREG)  
+	in r_temp,_SFR_IO_ADDR(SREG)
 	push r_temp
 	push r_temp2
 	cdb
 	sbic OW_PIN,OW_PINN  ; abkuerzung wenn Leitung schon h
 	rjmp tint_end ; Leitung 1 kein Reset
-	ldi r_temp,0  
+	ldi r_temp,0
 	out TCNT_REG,r_temp
 	CLEAR_TOV_FLAG
 	ldi r_temp2,3 ;3x overrun for timeout
 tint_loop_rend:
 	JMP_NO_TOV ;ueberspringe wenn kein ueberlauf
 	rjmp tint_handle_timeout
-	sbis OW_PIN,OW_PINN ;warten bis leitung wieder h 
+	sbis OW_PIN,OW_PINN ;warten bis leitung wieder h
 	rjmp tint_loop_rend
 	;JMP_NO_TOV ;ueberspringe wenn kein ueberlauf
 	cpi r_temp2,3
 	;rjmp tint_overrun
 	brne tint_overrun
 	in r_temp,TCNT_REG ;schauen ob es lange genug gedauert hat fuer reset
-	cpi r_temp,OWT_RESET2 
+	cpi r_temp,OWT_RESET2
 	brlo tint_end
 tint_overrun:
 	ldi r_temp,0
@@ -71,7 +71,7 @@ tint_loop_pres:
 	in r_temp,TCNT_REG
 	cpi r_temp,OWT_PRESENT
 	brlo tint_loop_pres
-	cbi OW_DDR,OW_PINN  
+	cbi OW_DDR,OW_PINN
 	ldi r_temp,OW_READ_ROM_COMMAND ; Initialisieren von Rom command
 	sts mode,r_temp
 	ldi r_temp,1
@@ -79,7 +79,7 @@ tint_loop_pres:
 	sts bcount,r_temp ;bit eins
 	clr r_temp
 	sts sendflag,r_temp ;empfangen (rom_command)
-	;sts wzero,r_temp ;alles 0 
+	;sts wzero,r_temp ;alles 0
 	RESETZEROMARKER
 	CLEAR_INTERRUPT_FLAG
 tint_end:

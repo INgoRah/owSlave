@@ -5,11 +5,26 @@ I2C master code from an unofficial github repository for Peter Fleury's I2C libr
 http://homepage.hispeed.ch/peterfleury/avr-software.html#libs now cloned to
 https://github.com/alx741/avr_i2c.git
 License GPL v3
+
 ## Changes
+Version 1.9, 2025-12-18
+- Fix a bug, when the watchdog fires after any left over 1-wire activity (which is
+  still in spec).
+  This is solved with that soft watchdog timer of 1 second.
+  That could have caused issues on broken masters when a transfer
+  is stopped after reset and could have also blocked pin detection
+- Watchdog behaviour changed: first a soft watchdog fires after 1s and
+  resets internal states, alarms and triggers a hard watchdog
+  for 60 ms if the system does not go to normal.
+- status field retuns 0x08 for soft watchdog, 0x88 for hard (as before)
+- Fix CRC overwrite when the config command is used. That was causing a
+  fallback to fixed owids (compile time)
+
 Version 1.8, 2024-11-28
 - Dual DS2450 (ADC) support and minor fixes
 - the cfg read on the custom space seems not to be working yet
   on dual ROM
+- Alarm on watchdog reset
 
 Version 1.7, 2024-11-22
 - Timer based switch (supports one timer only)

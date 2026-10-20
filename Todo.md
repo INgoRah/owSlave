@@ -1,4 +1,5 @@
 # Slave
+[ ] Timer time configurable via config or pin config
 [-] clean up pins. Btn + output or remove fixed outputs (from config)
 [x] auto switch by configuration
 [x] configure hardware (buttons vs. normal pin, active low vs high) and store in eeprom
