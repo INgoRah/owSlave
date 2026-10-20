@@ -288,6 +288,22 @@ static void sync_pins()
 }
 
 #if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+#define WDT_SAVE_MAGIC 0xA5
+/* output state saved by the watchdog ISR to be restored after the
+   following watchdog reset. Not initialized by the startup code, so it
+   survives a reset, but is random after power on (checked by chk). */
+static struct {
+	uint8_t ddr;
+	uint8_t port;
+	uint8_t latch;
+	uint8_t chk;
+} wdt_save __attribute__((section(".noinit")));
+
+static inline uint8_t wdt_save_chk(void)
+{
+	return WDT_SAVE_MAGIC ^ wdt_save.ddr ^ wdt_save.port ^ wdt_save.latch;
+}
+
 #ifdef WDT_vect
 ISR(WDT_vect)
 #else
@@ -295,6 +311,11 @@ ISR(WATCHDOG_vect)
 #endif
 {
 	wdr();
+	// keep port states over the reset which may follow
+	wdt_save.ddr = PIN_DDR;
+	wdt_save.port = PORT_REG;
+	wdt_save.latch = pack.PIO_Output_Latch_State;
+	wdt_save.chk = wdt_save_chk();
 	// set a flag to indicate that a watchdog occurred
 	pack.Status = 0x08;
 	// store variables for debugging
@@ -657,6 +678,9 @@ static void cfg_init(void)
 
 void setup()
 {
+#ifdef WDT_SAVE
+	uint8_t wdt_restore = 0;
+#endif
 #ifdef WDT_ENABLED
 	uint8_t mcusr_old;
 
@@ -669,7 +693,25 @@ void setup()
 	wdt_disable();
 	if (mcusr_old & _BV(WDRF)) {
 		/* Watchdog occured */
+#ifdef WDT_SAVE
+		if (wdt_save.chk == wdt_save_chk()) {
+			/* restore the PIO pins only (not the OW pin) */
+			uint8_t i, m = 0;
+
+			for (i = 0; i < MAX_BTN; i++)
+				m |= pio_map[i];
+			/* port first, so outputs get their level directly */
+			PORT_REG = (PORT_REG & ~m) | (wdt_save.port & m);
+			PIN_DDR = (PIN_DDR & ~m) | (wdt_save.ddr & m);
+			wdt_restore = 1;
+			pack.Status = 0x08;
+		} else
 		pack.Status = 0x88;
+		/* use only once */
+		wdt_save.chk = ~wdt_save_chk();
+#else
+		pack.Status = 0x88;
+#endif
 		LED2_ON();
 	} else {
 		pack.Status = 0x80;
@@ -684,11 +726,26 @@ void setup()
 #endif
 	cfg_init();
 	var_init();
+#ifdef WDT_SAVE
+	if (wdt_restore)
+		pack.PIO_Output_Latch_State = wdt_save.latch;
+#endif
 	OWST_INIT_ALL_OFF;
 	OWST_EN_PULLUP
 	/* pull ups on all pins set by OWST_INIT_ALL_OFF */
 	OWINIT();
 	reg_init();
+#ifdef WDT_SAVE
+	if (wdt_restore) {
+		/* init above switched outputs off (for some us),
+		   set them according to the restored latch */
+		uint8_t i;
+
+		for (i = 0; i < MAX_BTN; i++)
+			if (config_info[CFG_CFG_ID + i] & CFG_OUT_MASK)
+				pin_set(pio_map[i], i, 1 << i);
+	}
+#endif
 #ifdef DS1820_SUPPORT
 	temp_setup();
 #endif
@@ -758,17 +815,36 @@ static void ow_loop()
 		    config_info[1] == 0xad) {
 			switch (config_info[2]) {
 				case 0x01:
-					/* soft reset */
-					delay(500);
-					gcontrol &= ~0x10;
-					return;
+					/* soft reset: let the watchdog interrupt fire */
 				case 0x02:
 					/* soft reset followed by hard reset */
 					delay(1500);
 					gcontrol &= ~0x10;
+#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+				{
+					/* no fixed delay: the watchdog oscillator is
+					   not precise, wait until the ISR has run */
+					int to = 3000;
+
+					pack.Status &= ~0x08;
+					while (to-- && (pack.Status & 0x08) == 0)
+						delay(1);
+					if (config_info[2] == 0x01)
+						/* the ISR armed a 250 ms reset, the main
+						   loop resets it from now on */
+						return;
+				}
+				/* hard reset, after the ISR by its 250 ms timeout,
+				   or forced, if the watchdog was not running yet */
+				wdt_enable(WDTO_250MS);
+				while(1);
+#endif
 					return;
 				case 0xff:
-					/* hard reset */
+					/* hard reset, do not restore outputs */
+#ifdef WDT_SAVE
+					wdt_save.chk = ~wdt_save_chk();
+#endif
 					wdt_enable(WDTO_15MS);
 					while(1);
 					break;

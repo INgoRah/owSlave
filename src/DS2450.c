@@ -18,16 +18,16 @@ void adc_loop()
 
 	if (gcontrol & 0x20) {
 		gcontrol &= ~0x20;
-		idx = packadc.convc1 - 1;
-		if (idx > 3)
-			return;
+		/* got a start conversion command, force update of all
+		   channels in the input select mask: bit 0 = A .. bit 3 = D.
+		   The read-out control (convc2) is not needed, the result
+		   is there before the master can read */
+		for (idx = 0; idx < 4; idx++) {
+			if ((packadc.convc1 & (1 << idx)) == 0)
+				continue;
 		wdt_reset();
-		/* got a start conversion command, force update */
-		if (idx == 0)
-			packadc.ch[idx] = 1234;
-		else
 			packadc.ch[idx] = analogRead(idx);
 	}
-	packadc.ch[0] = 1234;
+	}
 }
 #endif /* DS2450_SUPPORT */
