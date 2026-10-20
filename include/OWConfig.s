@@ -72,6 +72,11 @@
 .comm flashmarker,1
 #endif
 
+/* = CFG_CUSTOM1_LEN in DS2408.h, cfg_custom1 has one more byte in RAM */
+#define CFG_CUSTOM1_LEN 22
+/* = size of config_info2 in DS2408.c */
+#define CFG_INFO2_LEN 8
+
 .macro configZ m,offs
 	ldi  zl,lo8(\m)       
 	; daten im gleichen 256 Segment

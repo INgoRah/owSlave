@@ -364,6 +364,21 @@ h_fwconfiginfo1:
 h_fwconfiginfo2:
 	rjmp handle_end_sleep
 #else
+#ifdef TIMER_SUPPORT
+	lds r_temp,cfg_type
+	cpi r_temp,1
+	brne h_fwconfiginfo1_def
+	; custom config, 0xff past it, CRC/end from byte 24 on as usual
+	cpi r_bytep,CFG_CUSTOM1_LEN+1
+	breq h_fwconfiginfo1_ff
+	brsh h_fwconfiginfo_go
+	configZ cfg_custom1,r_bytep
+	rjmp h_fwconfiginfo_go
+h_fwconfiginfo1_ff:
+	ldi r_rwbyte,0xff
+	rjmp handle_end_inc
+h_fwconfiginfo1_def:
+#endif
 	configZ config_info1,r_bytep
 	rjmp h_fwconfiginfo_go
 h_fwconfiginfo2:
@@ -449,9 +464,12 @@ h_fwconfiginfo_customcfg:
 	rjmp handle_end_inc
 
 h_fwwriteconfig2:
+	; config_info2 has only CFG_INFO2_LEN bytes, ignore the rest
+	cpi  r_bytep,CFG_INFO2_LEN
+	brsh 1f
 	configZ config_info2,r_bytep
 	st   Z,r_rwbyte
-	cpi  r_bytep,22
+1:	cpi  r_bytep,22
 	breq h_writeconfig_all
 	rjmp handle_end_inc
 
@@ -653,7 +671,8 @@ EXTERN_SLEEP:
 	push r_temp ; r_temp (r16) is call-saved in the C ABI
 	ldi r_temp,0
 	sts mode,r_temp ;SLEEP: next bits are ignored until a reset
-	sts gcontrol,r_temp ; drop pending requests to the C main loop
+	; keep gcontrol: its requests are complete commands (CRC sent),
+	; dropping them loses e.g. a convert request on the idle timeout
 	sts sendflag,r_temp ; receive, never drive a stale byte onto the bus
 	sts bcount,r_temp ; no bits left of the current byte
 	RESETZEROMARKER ; do not pull the line low on the next falling edge
