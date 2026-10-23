@@ -125,7 +125,6 @@ extern uint8_t config_info[26];
 extern volatile pack_t pack;
 extern void latch_out(uint8_t bb);
 extern volatile uint8_t int_signal;
-extern volatile uint8_t active;
 #ifdef TIMER_SUPPORT
 extern uint8_t cfg_custom1[CFG_CUSTOM1_LEN + 1];
 #endif
