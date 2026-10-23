@@ -287,7 +287,13 @@ hrc_reset_activity:
 	clr r_temp
 	sts alarmflag,r_temp
 	sts pack+2,r_temp 	; pack.PIO_Activity_Latch_State = 0
-	sts pack+5,r_temp	; pack.Status = 0
+	; pack.Status: all but the reset flags (0x80 reset, 0x88 watchdog),
+	; they stay for the master to see - a latch reset may well follow
+	; right after the reset, e.g. as part of a PIO write. The master
+	; clears them by writing the status register (0xCC to 0x8D).
+	lds r_temp,pack+5
+	andi r_temp,0x88
+	sts pack+5,r_temp
 	ldi r_temp,2
 	sts gcontrol,r_temp
 	ldi r_rwbyte,0xAA

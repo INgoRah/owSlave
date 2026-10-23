@@ -205,9 +205,10 @@
 #define CFG_OUT_HIGH 0x22
 #define CFG_OUT_PWM 0x23
 
-#define CFG_CFG_FEAT 19
+#define CFG_FEAT_ID 19
 #define FEAT_TEMP 0x01
 #define FEAT_ADC_LIGHT 0x02
+#define FEAT_TIMER 0x04
 
 #define CFG_OFFSET 20
 
