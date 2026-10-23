@@ -34,8 +34,9 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
-#if defined(WDT_ENABLED) || defined(DS1820_SUPPORT)
+/* always: the hard reset (0xDEAD 0xFF) uses the watchdog as well */
 #include <avr/wdt.h>
+#if defined(WDT_ENABLED) || defined(DS1820_SUPPORT)
 #define wdr wdt_reset
 #else
 #define wdr() do { ; } while(0)
@@ -165,11 +166,11 @@ struct pinState btn[MAX_BTN];
 uint8_t values[CHAN_VALUES];
 uint8_t ap = 0;
 uint8_t int_signal;
-/** Activity state bitmask
+/** Activity state bitmask, active is GPIOR0 (see DS2408.h), 0 after
+ * a reset
  * ACT_BUTTON (1): button handling active
  * x: timer running
  */
-volatile uint8_t active = 0;
 
 /* modify active from main context: PCINT0_vect sets ACT_BUTTON,
    a plain read-modify-write could lose that bit */
@@ -341,14 +342,13 @@ ISR(WATCHDOG_vect)
 }
 #endif /* defined(WDT_ENABLED) && !defined(DS1820_SUPPORT) */
 
-ISR(PCINT0_vect) {
+/* Naked: the sbi below changes neither a register nor SREG, so there
+   is nothing to save - 12 cycles in all, the 1-Wire interrupt waits
+   that long at most. Anything more here needs the prologue back.
+   The flag is cleared by the hardware entering the vector. */
+ISR(PCINT0_vect, ISR_NAKED) {
 	active |= ACT_BUTTON;
-#if defined(GIFR) && defined(PCIF0)
-	GIFR = _BV(PCIF0);
-#endif
-#if defined(GIFR) && defined(PCIF)
-	GIFR = _BV(PCIF);
-#endif
+	reti();
 }
 
 /* sets a pin, but does not change any interrupt on that pin.
@@ -867,8 +867,8 @@ static void ow_loop()
 						or forced, if the watchdog was not running yet */
 						wdt_enable(WDTO_250MS);
 						while(1);
-					}
 #endif
+					}
 					return;
 				case 0xff:
 					/* hard reset, do not restore outputs */
@@ -905,9 +905,17 @@ static void ow_loop()
 		cli();
 		gcontrol &= ~0x40;
 		sei();
+		switch (pin_tmr.type) {
+			case TMR_TYPE_EXTPORT:
+			    DDRC = pin_tmr.val1;
+				PORTC = pin_tmr.val2;
+				break;
+			default:
 #ifdef TIMER_SUPPORT
-		timed_switch(pin_tmr.type, pin_tmr.val1, 0xff);
+				timed_switch(pin_tmr.type, pin_tmr.val1, 0xff);
 #endif /* TIMER_SUPPORT */
+				break;
+		}
 	}
 }
 

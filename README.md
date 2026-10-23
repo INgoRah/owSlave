@@ -109,6 +109,7 @@ Version 1.1
   FEA [19] - Feature if bit is cleared: 
     0x1 can do temperature
     0x2 can do ADC for brightness read
+    0x4 supports pin timers and extended auto switching
   Reserved [20]
   Version [21..22]
   Type [23]

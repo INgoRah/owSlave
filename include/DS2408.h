@@ -130,6 +130,11 @@
 #define MAX_TIMER 1
 #endif
 
+/* The activity bits (ACT_*), see DS2408.c. In a general purpose I/O
+   register: set, cleared and tested by single sbi/cbi/sbic/sbis, which
+   keeps the PCINT0 ISR at sbi + reti. Volatile as any I/O register. */
+#define active GPIOR0
+
 /* see active doc */
 #define ACT_BUTTON 0x01
 #define ACT_TIMER1 0x02
@@ -258,6 +263,8 @@
 #define TMR_TYPE_BRIGHTNESS 0xE3
 /** Configure brigthness threshold when to switch */
 #define TMR_TYPE_THRESHOLD 0xE5
+/** Extended PORT setting */
+#define TMR_TYPE_EXTPORT 0xE7
 
 /** Switch on without timer (force on) */
 #define TMR_TYPE_ON 0xDD
