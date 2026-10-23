@@ -202,7 +202,6 @@ static void led_flash(void)
 }
 #endif
 
-// TODO use assembly function
 static uint8_t crc(uint8_t* input, uint8_t len) {
 	unsigned char inbyte, crc = 0;
 	unsigned char i, mix;
@@ -682,6 +681,14 @@ static void cfg_init(void)
 #endif
 	}
 #endif
+	/*
+	 * setup compile time feature in config
+	 * config_info[CFG_FEAT_ID] &= ~FEAT_ADC_LIGHT is set
+	 * by eeprom write on provisioning
+	*/
+#ifdef TIMER_SUPPORT
+	config_info[CFG_FEAT_ID] &= ~FEAT_TIMER;
+#endif
 }
 
 void setup()
@@ -841,29 +848,28 @@ static void ow_loop()
 				case 0x01:
 					/* soft reset: let the watchdog interrupt fire */
 				case 0x02:
-					/* soft reset followed by hard reset */
-					gcontrol &= ~0x10;
+					{
+						/* soft reset followed by hard reset */
+						gcontrol &= ~0x10;
 #if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
-				{
-					/* no fixed delay: the watchdog oscillator is
-					   not precise, wait until the ISR has run */
-					int to = 3000;
+						/* no fixed delay: the watchdog oscillator is
+						not precise, wait until the ISR has run */
+						int to = 3000;
 
-					pack.Status &= ~0x08;
-					while (to-- && (pack.Status & 0x08) == 0)
-						delay(1);
-					if (config_info[2] == 0x01)
-						/* the ISR armed a 250 ms reset, the main
-						   loop resets it from now on */
-						return;
-				}
-				/* hard reset, after the ISR by its 250 ms timeout,
-				   or forced, if the watchdog was not running yet */
-				wdt_enable(WDTO_250MS);
-				while(1);
-#else
-				return;
+						pack.Status &= ~0x08;
+						while (to-- && (pack.Status & 0x08) == 0)
+							delay(1);
+						if (config_info[2] == 0x01)
+							/* the ISR armed a 250 ms reset, the main
+							loop resets it from now on */
+							return;
+						/* hard reset, after the ISR by its 250 ms timeout,
+						or forced, if the watchdog was not running yet */
+						wdt_enable(WDTO_250MS);
+						while(1);
+					}
 #endif
+					return;
 				case 0xff:
 					/* hard reset, do not restore outputs */
 #ifdef WDT_SAVE
@@ -1076,7 +1082,7 @@ static void timed_switch(uint8_t type, uint8_t tim, uint8_t src)
 	    (active & ACT_TIMER1_ALL) == 0) {
 		/* check if this is supported by FEAT otherwise
 			use external setting TMR_TYPE_BRIGHTNESS */
-		if ((config_info[CFG_CFG_FEAT] & FEAT_ADC_LIGHT) == 0) {
+		if ((config_info[CFG_FEAT_ID] & FEAT_ADC_LIGHT) == 0) {
 			int a = analogRead(0);
 			brightness = (a >> 2) & 0xFE;
 		}
