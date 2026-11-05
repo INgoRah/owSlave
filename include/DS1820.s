@@ -21,13 +21,24 @@ hrc_set_writescratchpad:
 	rjmp handle_end
 
 #ifdef _HANDLE_CC_COMMAND_
+;---------------------------------------------------
+;   after SKIP ROM (0xCC): addresses every device on the bus, both ROMs
+;   of this one. Only Convert T (0x44) is taken, as it sends nothing
+;   back (a read or write would collide with the other devices). Any
+;   other command: wait for the next reset, as the DS2408 part does
+;   (a real DS2408 does not know 0x44 either).
+;---------------------------------------------------
+h_readcommand12:
+	clr r_bytep
+	cjmp 0x44,hrc_set_convertT12
+	rjmp handle_end_sleep
+
 hrc_set_convertT12:
 	rjmp hrc_set_convertT
 #endif
 
 hrc_set_convertT:
-	ldi r_temp,0x20
-	sts gcontrol,r_temp
+	gcset r_temp,0x20
 hrc_set_convertT12b:
 	ldi r_mode,OW_CONVERT_RUN
 	ldi r_sendflag,3 ;set bit 0 and 1 for no zero polling

@@ -36,7 +36,7 @@
 #include <util/delay.h>
 /* always: the hard reset (0xDEAD 0xFF) uses the watchdog as well */
 #include <avr/wdt.h>
-#if defined(WDT_ENABLED) || defined(DS1820_SUPPORT)
+#ifdef WDT_ENABLED
 #define wdr wdt_reset
 #else
 #define wdr() do { ; } while(0)
@@ -56,6 +56,9 @@
 #endif
 
 #include "DS2408.h"
+#ifdef BL_SUPPORT
+#include "owbootloader.h"
+#endif
 #ifdef DS1820_SUPPORT
 #include "DS1820.h"
 #endif
@@ -135,14 +138,21 @@ uint8_t config_info1[26];
 uint8_t config_info2[8];
 #else
 #endif
-#ifdef TIMER_SUPPORT
-volatile pin_t pin_tmr;
 /* + 1: byte 22 of a custom config write, 0x55 = save to EEPROM */
 uint8_t cfg_custom1[CFG_CUSTOM1_LEN + 1];
+/* byte 0 of the last config write, CC_xxx */
 uint8_t cfg_type;
+/* a control command, see CC_BL_ENTER and CC_TEST */
+uint8_t cfg_cmd[CFG_CMD_LEN];
+#ifdef TIMER_SUPPORT
+volatile pin_t pin_tmr;
 
 struct {
-	unsigned long tmr;
+	/* low 16 bits of _ms at the last step: now - last is right across
+	   the wrap, 16 bits keep the arithmetic small */
+	uint16_t last;
+	/* seconds left while running (ACT_TIMER1) */
+	uint16_t left;
 	uint8_t pin;
 	uint8_t lvl;
 	/* level set at start, lvl gets decremented while dimming down */
@@ -203,6 +213,7 @@ static void led_flash(void)
 }
 #endif
 
+#if defined(OWID_CHECK) || defined(DUAL_ROM)
 static uint8_t crc(uint8_t* input, uint8_t len) {
 	unsigned char inbyte, crc = 0;
 	unsigned char i, mix;
@@ -221,6 +232,7 @@ static uint8_t crc(uint8_t* input, uint8_t len) {
 
 	return crc;
 }
+#endif
 
 unsigned long millis()
 {
@@ -228,9 +240,11 @@ unsigned long millis()
 }
 
 #ifdef TIMER_SUPPORT
-static unsigned long secs()
+/* the timers only run while the main loop is awake (no sleep with
+   ACT_TIMER), _ms is only counted there */
+static inline uint16_t ms16(void)
 {
-	return _ms / 1000;
+	return (uint16_t)_ms;
 }
 #endif
 
@@ -294,7 +308,7 @@ static void sync_pins()
 	}
 }
 
-#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+#ifdef WDT_ENABLED
 #define WDT_SAVE_MAGIC 0xA5
 /* output state saved by the watchdog ISR to be restored after the
    following watchdog reset. Not initialized by the startup code, so it
@@ -340,7 +354,7 @@ ISR(WATCHDOG_vect)
 	/* fire a reset if not handled */
 	wdt_enable(WDTO_250MS);
 }
-#endif /* defined(WDT_ENABLED) && !defined(DS1820_SUPPORT) */
+#endif /* WDT_ENABLED */
 
 /* Naked: the sbi below changes neither a register nor SREG, so there
    is nothing to save - 12 cycles in all, the 1-Wire interrupt waits
@@ -621,7 +635,9 @@ static void reg_init(void)
 */
 static void cfg_init(void)
 {
+#ifdef OWID_CHECK
 	uint8_t crc_calc;
+#endif
 #ifndef AVRSIM
 	int to = 100;
 
@@ -630,6 +646,7 @@ static void cfg_init(void)
 
 	eeprom_read_block((void*)owid, (const void*)0, 8);
 #endif /* AVRSIM */
+#ifdef OWID_CHECK
 	crc_calc = crc(owid, 7);
 	if (owid[0] != 0x29 || crc_calc != owid[7]) {
 		owid[0] = 0x29;
@@ -641,6 +658,7 @@ static void cfg_init(void)
 		owid[6] = 0x77;
 		owid[7] = crc(owid, 7);
 	}
+#endif
 #ifdef DUAL_ROM
 	for (int i = 1; i < 7; i++)
 		owid2[i] =  owid[i];
@@ -665,6 +683,9 @@ static void cfg_init(void)
 #endif
 	config_info[CFG_VERS_ID] = MAJ_VERSION;
 	config_info[CFG_VERS_ID + 1] = MIN_VERSION;
+	/* the config control (CC_xxx), not a config byte: read back and
+	   written again a config is a plain one */
+	config_info[0] = 0xff;
 #if defined(__AVR_ATmega48__)||defined(__AVR_ATmega88PA__)||defined(__AVR_ATmega88__)||defined(__AVR_ATmega88P__)||defined(__AVR_ATmega168__)||defined(__AVR_ATmega168A__)
 	config_info[CFG_TYPE_ID] = 4;
 #endif
@@ -688,6 +709,9 @@ static void cfg_init(void)
 	*/
 #ifdef TIMER_SUPPORT
 	config_info[CFG_FEAT_ID] &= ~FEAT_TIMER;
+#endif
+#ifdef BL_SUPPORT
+	config_info[CFG_FEAT_ID] &= ~FEAT_BL;
 #endif
 }
 
@@ -778,6 +802,65 @@ void setup()
 	}
 }
 
+#ifdef BL_SUPPORT
+/* To the 1-Wire bootloader for a firmware update, see owbootloader.h:
+   BL_MAGIC in r24:r25 makes it stay. The outputs keep their state, the
+   bootloader starts the application again by a watchdog reset. */
+static void __attribute__((noreturn)) bl_enter(void)
+{
+	cli();
+	/* ijmp: the ATtinys have no jmp, rjmp does not reach it from
+	   everywhere */
+	asm volatile(
+		"ldi r24, lo8(%0)\n\t"
+		"ldi r25, hi8(%0)\n\t"
+		"ijmp\n\t" :: "i" (BL_MAGIC), "z" (BL_START / 2) : "r24", "r25");
+	for (;;)
+		;
+}
+#endif
+
+#ifdef WDT_TEST
+/* CC_TEST: 0xDE 0xAD op
+   0x01 soft reset: the watchdog interrupt fires, no reset
+   0x02 soft reset followed by a hard reset
+   0xff hard reset, the outputs not restored */
+static void test_cmd(uint8_t op)
+{
+	switch (op) {
+		case 0x01:
+		case 0x02:
+			{
+#ifdef WDT_ENABLED
+				/* no fixed delay: the watchdog oscillator is
+				not precise, wait until the ISR has run */
+				int to = 3000;
+
+				pack.Status &= ~0x08;
+				while (to-- && (pack.Status & 0x08) == 0)
+					delay(1);
+				if (op == 0x01)
+					/* the ISR armed a 250 ms reset, the main
+					loop resets it from now on */
+					return;
+				/* hard reset, after the ISR by its 250 ms timeout,
+				or forced, if the watchdog was not running yet */
+				wdt_enable(WDTO_250MS);
+				while(1);
+#endif
+			}
+			break;
+		case 0xff:
+#ifdef WDT_SAVE
+			wdt_save.chk = ~wdt_save_chk();
+#endif
+			wdt_enable(WDTO_15MS);
+			while(1);
+			break;
+	}
+}
+#endif /* WDT_TEST */
+
 static void ow_loop()
 {
 	if (reset_indicator) {
@@ -789,6 +872,8 @@ static void ow_loop()
 	}
 	if (gcontrol & 1) {
 		uint8_t i;
+
+		gcontrol_clr(0x01);
 		// TODO check standard IO handling with PWM outputs
 		// started via pin timer
 		// TODO setting off via latch must stop timer?
@@ -799,11 +884,10 @@ static void ow_loop()
 		 latch reset activate it again
 		 */
 		int_signal = SIG_NO;
-		gcontrol &= ~0x01;
 	}
 	if (gcontrol & 2) {
 		/* OW_RESET_ACTIVITY, pack data and alarm is reset in asm */
-		gcontrol &= ~0x02;
+		gcontrol_clr(0x02);
 		int_signal = SIG_ARM;
 	}
 #if 0
@@ -825,63 +909,46 @@ static void ow_loop()
 	}
 #endif
 	if (gcontrol & 0x10) {
-		/* this is set when all bytes (22) were received */
-#ifdef TIMER_SUPPORT
-		if (cfg_type == 1) {
-			/* custom config (written into cfg_custom1), the pins
-			   are not affected. Byte 22 = 0x55 saves it */
-			cli();
-			gcontrol &= ~0x10;
-			sei();
-			if (cfg_custom1[CFG_CUSTOM1_LEN] == 0x55) {
-				cfg_custom1[CFG_CUSTOM1_LEN] = 0;
-				wdr();
-				eeprom_update_block((const void*)cfg_custom1, (void*)CFG_CUSTOM1, CFG_CUSTOM1_LEN);
-				wdr();
-			}
-			return;
-		}
-#endif /* TIMER_SUPPORT */
-		if (config_info[0] == 0xde &&
-		    config_info[1] == 0xad) {
-			switch (config_info[2]) {
-				case 0x01:
-					/* soft reset: let the watchdog interrupt fire */
-				case 0x02:
-					{
-						/* soft reset followed by hard reset */
-						gcontrol &= ~0x10;
-#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
-						/* no fixed delay: the watchdog oscillator is
-						not precise, wait until the ISR has run */
-						int to = 3000;
+		/* a config write complete, what it is by its byte 0, see
+		   CC_xxx. Taken together: a new write meanwhile sets both */
+		uint8_t cc;
 
-						pack.Status &= ~0x08;
-						while (to-- && (pack.Status & 0x08) == 0)
-							delay(1);
-						if (config_info[2] == 0x01)
-							/* the ISR armed a 250 ms reset, the main
-							loop resets it from now on */
-							return;
-						/* hard reset, after the ISR by its 250 ms timeout,
-						or forced, if the watchdog was not running yet */
-						wdt_enable(WDTO_250MS);
-						while(1);
-#endif
-					}
-					return;
-				case 0xff:
-					/* hard reset, do not restore outputs */
-#ifdef WDT_SAVE
-					wdt_save.chk = ~wdt_save_chk();
-#endif
-					wdt_enable(WDTO_15MS);
-					while(1);
-					break;
-			}
-		}
 		cli();
+		cc = cfg_type;
 		gcontrol &= ~0x10;
+		sei();
+		switch (cc) {
+#ifdef TIMER_SUPPORT
+			case CC_CUSTOM:
+				/* custom config (written into cfg_custom1), the pins
+				   are not affected. Byte 22 = 0x55 saves it */
+				if (cfg_custom1[CFG_CUSTOM1_LEN] == 0x55) {
+					cfg_custom1[CFG_CUSTOM1_LEN] = 0;
+					wdr();
+					eeprom_update_block((const void*)cfg_custom1, (void*)CFG_CUSTOM1, CFG_CUSTOM1_LEN);
+					wdr();
+				}
+				return;
+#endif /* TIMER_SUPPORT */
+			case CC_TEST:
+				/* without WDT_TEST ignored, not a config */
+#ifdef WDT_TEST
+				if (cfg_cmd[1] == 0xad)
+					test_cmd(cfg_cmd[2]);
+#endif
+				return;
+#ifdef BL_SUPPORT
+			case CC_BL_ENTER:
+				/* firmware update: key and complement against a
+				   write by mistake or a bit error (no CRC) */
+				if (cfg_cmd[1] == BL_ENTER_KEY &&
+				    cfg_cmd[2] == (uint8_t)~BL_ENTER_KEY)
+					bl_enter();
+				return;
+#endif
+		}
+		/* config_info (or config_info2, CC_INFO2) */
+		cli();
 		/* store crc and once matches the sent one, store eeprom */
 		if (config_info[CFG_VERS_ID] == 0x55) {
 			config_info[CFG_VERS_ID] = MAJ_VERSION;
@@ -905,17 +972,27 @@ static void ow_loop()
 		cli();
 		gcontrol &= ~0x40;
 		sei();
+#ifdef TIMER_SUPPORT
 		switch (pin_tmr.type) {
 			case TMR_TYPE_EXTPORT:
-			    DDRC = pin_tmr.val1;
+#ifdef ATMEGA
+				/* DDRC bit 6 is the zero marker of the 1-Wire
+				   interrupt (see OWSet_ATMEGA168.s), not a pin of
+				   the port (PC6 is RESET): kept, with the
+				   interrupts off as the interrupt changes it */
+				cli();
+				DDRC = (DDRC & _BV(DDC6)) | (pin_tmr.val1 & ~_BV(DDC6));
+				sei();
 				PORTC = pin_tmr.val2;
+#else
+				// could use I2C for PCF devices
+#endif
 				break;
 			default:
-#ifdef TIMER_SUPPORT
 				timed_switch(pin_tmr.type, pin_tmr.val1, 0xff);
-#endif /* TIMER_SUPPORT */
 				break;
 		}
+#endif /* TIMER_SUPPORT */
 	}
 }
 
@@ -1032,6 +1109,34 @@ uint8_t auto_switch(uint8_t i, uint8_t val)
 static void timed_switch_stopping();
 static void timed_switch_stop();
 
+/* a timer output to lvl (0 = off): PWM with its level, otherwise the
+   latch; the pin's state for the master. Kept out of line, the timer
+   functions share it */
+static void __attribute__((noinline)) timed_out(uint8_t pin, uint8_t lvl)
+{
+	uint8_t out = 1 << pin;
+
+	if (lvl)
+		pack.PIO_Output_Latch_State &= ~out;
+	else
+		pack.PIO_Output_Latch_State |= out;
+	if (config_info[CFG_CFG_ID + pin] == CFG_OUT_PWM) {
+		analogWrite(pio_map[pin], lvl);
+		pack.PIO_Logic_State &= ~out;
+		latch_state(out);
+	} else
+		latch_out(out);
+}
+
+/* the change for the master, if no alarm is pending yet */
+static void __attribute__((noinline)) timed_signal(void)
+{
+	if (int_signal == SIG_ARM && !alarmflag) {
+		int_signal = SIG_ACT;
+		alarmflag = 1;
+	}
+}
+
 /* Start a timer or do related configs
  * Timer start needs pin_tmr.pin (0..7) and pin_tmr.val2 (level)
  * src: triggering input (0..7) or 0xff if not triggered by an input
@@ -1105,17 +1210,13 @@ static void timed_switch(uint8_t type, uint8_t tim, uint8_t src)
 		   (maybe dimming down) timer, otherwise full on */
 		lvl = (active & ACT_TIMER1_ALL) ? tmr[tmr_nr].lvl_on : 0xFE;
 	// Button toggle not yet implemented!
-	pack.PIO_Output_Latch_State &= ~out;
 	LED2_ON();
+	timed_out(pin_tmr.pin, lvl);
 	if (config_info[CFG_CFG_ID + pin_tmr.pin] == CFG_OUT_PWM) {
-		analogWrite(pio_map[pin_tmr.pin], lvl);
-		pack.PIO_Logic_State &= ~out;
-		latch_state(out);
 		alarmflag = 1;
 		if (int_signal == SIG_ARM)
 			int_signal = SIG_ACT;
-	} else
-		latch_out(out);
+	}
 
 	tmr[tmr_nr].lvl = lvl;
 	tmr[tmr_nr].lvl_on = lvl;
@@ -1134,32 +1235,23 @@ static void timed_switch(uint8_t type, uint8_t tim, uint8_t src)
 	tmr[tmr_nr].src = src;
 	t = tim * cfg_custom1[CFG_CUSTOM1_DIF];
 	tmr[tmr_nr].dur = t;
-	tmr[tmr_nr].tmr = secs() + t;
+	tmr[tmr_nr].left = t;
+	tmr[tmr_nr].last = ms16();
 	statusPrint();
 }
 
 static void timed_switch_stop()
 {
-	uint8_t out;
 #if MAX_TIMER==1
 	const uint8_t tmr_nr = 0;
 
 	active_mod(ACT_TIMER1 | ACT_DIM_DN1, 0);
 #endif /* MAX_TIMER */
 	tmr[tmr_nr].lvl = 0;
-	out = 1 << (tmr[tmr_nr].pin);
-	pack.PIO_Output_Latch_State |= out;
 	pack.Status &= ~0x60;
-	if (config_info[CFG_CFG_ID + tmr[tmr_nr].pin] == CFG_OUT_PWM) {
-		analogWrite(pio_map[tmr[tmr_nr].pin], 0);
-		pack.PIO_Logic_State &= ~out;
-		latch_state(out);
-		if (int_signal == SIG_ARM && !alarmflag) {
-			int_signal = SIG_ACT;
-			alarmflag = 1;
-		}
-	} else
-		latch_out(out);
+	timed_out(tmr[tmr_nr].pin, 0);
+	if (config_info[CFG_CFG_ID + tmr[tmr_nr].pin] == CFG_OUT_PWM)
+		timed_signal();
 	statusPrint();
 }
 
@@ -1175,15 +1267,12 @@ static void timed_switch_stopping()
 	if (tmr[tmr_nr].lvl == 0)
 		return;
 	active_mod(ACT_TIMER1, ACT_DIM_DN1);
-	tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];
+	tmr[tmr_nr].last = ms16();
 	tmr[tmr_nr].lvl--;
 	analogWrite(pio_map[tmr[tmr_nr].pin], tmr[tmr_nr].lvl);
 	pack.Status &= ~0x20;
 	pack.Status |= 0x40;
-	if (int_signal == SIG_ARM && !alarmflag) {
-		int_signal = SIG_ACT;
-	 	alarmflag = 1;
-	}
+	timed_signal();
 }
 
 /* trigger input still active, e.g. a PIR holding its output high
@@ -1204,23 +1293,27 @@ static void timed_switch_loop()
 	const uint8_t tmr_nr = 0;
 #endif /* MAX_TIMER */
 
-	/* timer check */
-	if (tmr[tmr_nr].tmr == 0)
-		return;
+	uint16_t now = ms16();
+
 	if (active & ACT_DIM_DN1) {
-		/* should be
-		if (millis() - startTime >= duration)
-		*/
-		if (millis() < tmr[tmr_nr].tmr)
+		/* the next step after CFG_CUSTOM1_DIMD ms */
+		if ((uint16_t)(now - tmr[tmr_nr].last) < cfg_custom1[CFG_CUSTOM1_DIMD])
 			return;
-	} else if (secs() < tmr[tmr_nr].tmr) {
-		return;
+	} else if (tmr[tmr_nr].left) {
+		/* a second over: one less, no division of _ms needed. Late
+		   (bus traffic, EEPROM) it catches up on the next calls */
+		if ((uint16_t)(now - tmr[tmr_nr].last) < 1000)
+			return;
+		tmr[tmr_nr].last += 1000;
+		if (--tmr[tmr_nr].left)
+			return;
 	}
 	/* expired */
 	if (active & ACT_TIMER1) {
 		if (timed_switch_src_active(tmr[tmr_nr].src)) {
 			/* restart, switch off only after the input went inactive */
-			tmr[tmr_nr].tmr = secs() + tmr[tmr_nr].dur;
+			tmr[tmr_nr].left = tmr[tmr_nr].dur;
+			tmr[tmr_nr].last = now;
 			return;
 		}
 		/* dim down only PWM outputs with a level left, otherwise
@@ -1238,7 +1331,7 @@ static void timed_switch_loop()
 		return;
 	}
 	if (active & ACT_DIM_DN1) {
-		tmr[tmr_nr].tmr = millis() + cfg_custom1[CFG_CUSTOM1_DIMD];
+		tmr[tmr_nr].last = now;
 		if (tmr[tmr_nr].lvl-- == 0) {
 			timed_switch_stop();
 			return;
@@ -1247,6 +1340,22 @@ static void timed_switch_loop()
 	}
 }
 #endif /* TIMER_SUPPORT */
+
+/* The press time in FF1 (status ext 1), in 32 ms. The master takes a
+   release as the end of a long press only above 350 ms (in10dfs: FF1 >
+   350 / 32), the long press is signaled after BTN_LONG_PRESS_TIME
+   already. And millis() does not count while sleeping, which we do
+   once the long press is signaled (see BTN_LOW): a release after it
+   never reports less than BTN_LONG_FF1. 0xff means no press time, 0
+   the long press started. */
+#define BTN_LONG_FF1 (350 / 32 + 1)
+
+static uint8_t __attribute__((noinline)) press_ff1(unsigned long press, uint8_t min)
+{
+	uint8_t t = press >= 0xfeUL * 32 ? 0xfe : (uint16_t)press >> 5;
+
+	return t < min ? min : t;
+}
 
 static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 {
@@ -1261,8 +1370,9 @@ static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 		act_latch(1, mask);
 		break;
 	case BTN_PRESSED:
-		/* short pressed and done */
-		pack.FF1 = p->press / 32;
+		/* short pressed and done; not 0, that is the long press
+		   started */
+		pack.FF1 = press_ff1(p->press, 1);
 		// TODO if long press auto switch supported add press type
 		act_latch(1, mask);
 		auto_toggle(i);
@@ -1270,7 +1380,7 @@ static uint8_t btn_loop(uint8_t st, uint8_t mask, uint8_t i, struct pinState *p)
 	case BTN_RELEASED:
 		/* long pressed done for push buttons or
 			toggled the switch */
-		pack.FF1 = p->press / 32;
+		pack.FF1 = press_ff1(p->press, BTN_LONG_FF1);
 		act_latch(1, mask);
 		break;
 	case BTN_PRESS_LOW:
@@ -1463,7 +1573,7 @@ void loop()
 #endif /* TIMER_SUPPORT */
 		return;
 	}
-#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+#ifdef WDT_ENABLED
 	wdt_disable();
 #endif
 	sei();
@@ -1475,14 +1585,14 @@ void loop()
 		else
 			set_sleep_mode(SLEEP_MODE_IDLE);
 		/* in sleep mode the device wakes up only with a level interrupt */
-		MCUCR &= ~_BV(ISC01);
+		CLEAR_FALLING_EDGE
 #ifndef AVRSIM
 		sleep_mode();
 #endif
 	}
 	sei();
 	LED_ON();
-#if defined(WDT_ENABLED) && !defined(DS1820_SUPPORT)
+#ifdef WDT_ENABLED
 	cli();
 	wdt_tim_enable(WDTO_1S);
 	sei();

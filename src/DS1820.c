@@ -33,7 +33,6 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
-#include <avr/wdt.h>
 #include <avr/sleep.h>
 #include "Arduino.h"
 #include "wiring.h"
@@ -48,22 +47,11 @@
 #include "dht22.h"
 #endif
 
-/* Use the watchdog as 8 s wake up timer: interrupt only, NO reset.
- * - wdt_reset(): restart the counter
- * - clear WDRF, otherwise WDE is forced on (and a reset would follow)
- * - timed sequence: WDCE | WDE allows changing WDE and prescaler
- *   within the next 4 cycles, so this must be protected by interrupts
- * - write WDP3 | WDP0 (8 s) with WDE = 0: reset mode is switched off
- * - WDIE = 1: interrupt mode. As WDE = 0, WDIE is not cleared by
- *   hardware and the interrupt fires every 8 s until disabled.
- */
-#define wdt_tim_enable() do { \
-		wdt_reset(); \
-		MCUSR &= ~(_BV(WDRF)); \
-		WDTCSR = (1 << WDCE) | (1 << WDE); \
-		WDTCSR = (1 << WDP3) | (1 << WDP0); \
-		WDTCSR |= _BV(WDIE); \
-	}while(0);
+/* The temperature is only measured on a Convert T (0x44) of the master,
+ * like a real DS18x20, and once after start: no timer of its own, the
+ * watchdog stays a watchdog (WDT_ENABLED). The master polls, e.g. once
+ * a minute; the alarm flags (TH/TL) and the thermostat output
+ * (config_info2[5..7]) follow at that rate. */
 
 static void temp_update();
 
@@ -74,7 +62,6 @@ extern uint8_t config_info2[8];
 extern unsigned long _ms;
 
 volatile packt_t packt;
-volatile static uint8_t do_temp;
 int16_t last_temp;
 #ifdef BMP280_SUPPORT
 static uint8_t bmp280_found = 0;
@@ -83,22 +70,11 @@ uint16_t adc = 0;
 uint8_t cnt = 0;
 #endif
 
-#ifdef WDT_vect
-ISR(WDT_vect)
-#else
-ISR(WATCHDOG_vect)
-#endif
-{
-	do_temp++;
-}
-
 // when ADC completed, take an interrupt
 EMPTY_INTERRUPT (ADC_vect);
 
 void temp_setup()
 {
-	WDTCSR = _BV(WDIE) | _BV(WDCE);
-	wdt_tim_enable();
 	packt.TH = 22;
 	packt.TL = 18;
 	packt.rrFF = 0xff;
@@ -109,8 +85,9 @@ void temp_setup()
 	alarmflag2 = 0;
 	packt.temp = 20;
 	last_temp = 0;
-	/* force full update */
-	do_temp = 4;
+	/* first measurement right away, as if the master had asked (called
+	   before interrupts are enabled, so no race with the 1-Wire ISR) */
+	gcontrol |= 0x20;
 #ifdef BMP280_SUPPORT
 	bmp280_found = bmp280_init();
 	if (bmp280_found == 0)
@@ -164,7 +141,6 @@ void temp_read()
 	sei ();
 	sleep_cpu ();
 	sleep_disable ();
-	wdt_reset();
 	/* awake again, reading should be done, but better make sure
 	   maybe the timer interrupt fired */
 	while (bit_is_set (ADCSRA, ADSC));
@@ -183,8 +159,6 @@ void temp_read()
 		// still doing updates till 4 values can be averaged
 		if (cnt == 4)
 			adc = adc >> 2;
-		else
-			do_temp = 4;
 	} else 	{
 #ifndef ATMEGA		
 		int16_t temp;
@@ -254,28 +228,21 @@ static void temp_update()
 
 void temp_loop()
 {
-	static uint8_t upd = 0;
-	if (gcontrol & 0x20) {
-		gcontrol &= ~0x20;
-		wdt_reset();
-		/* got a start conversion command, force update */
-		do_temp = 1;
-		upd = 2;
-	}
-	if (do_temp > 0) {
-		wdt_reset();
-		WDTCSR |= _BV(WDIE);
-		do_temp = 0;
+	if ((gcontrol & 0x20) == 0)
+		return;
+	/* Convert T (or the first one after start) */
+	gcontrol_clr(0x20);
 #ifdef BMP280_SUPPORT
-		if (!bmp280_found)
-			return;
+	if (!bmp280_found)
+		return;
 #endif
-		/* not too often, every 4th watchdog wake up (4 * 8 s) is enough */
-		if (upd++ < 2 && last_temp != 0)
-			return;
-		upd = 0;
+#if !defined(BMP280_SUPPORT) && !defined(DHT22_SUPPORT)
+	/* the ADC is averaged over 4 samples: the first time take them all
+	   at once (< 1 ms each) instead of one per Convert T */
+	while (cnt < 4)
 		temp_read();
-		temp_update();
-	}
+#endif
+	temp_read();
+	temp_update();
 }
 #endif

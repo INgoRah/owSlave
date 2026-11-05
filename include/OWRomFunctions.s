@@ -276,9 +276,10 @@ h_fwconfiginfo:
 #warning No CRC known code implemented
 #endif
 h_fwconfiginfo_end:
+#ifdef TIMER_SUPPORT
 	lds r_temp,cfg_type
 	; is type 1?
-	cpi r_temp, 1
+	cpi r_temp, CC_CUSTOM
 	; no, so default config_info
 	brne h_fw_r_def_config_info
 	; yes: read custom config, 0xff past it
@@ -288,6 +289,7 @@ h_fwconfiginfo_end:
 	rjmp handle_end_inc
 1:	configZ cfg_custom1,r_bytep
 	rjmp h_fw_r_custom_cfg
+#endif
 
 h_fw_r_def_config_info:
 	configZ config_info,r_bytep
@@ -311,23 +313,37 @@ h_fwconfiginfo_all:
 	rjmp handle_end_sleep
 
 h_fwwriteconfig:
-#ifdef TIMER_SUPPORT
-	; check if first byte
+	; byte 0 is the config control, see README "Config control"
 	cpi  r_bytep,0
-	brne h_fwconfiginfo_selcfg
-	; 1st byte, so store
-	sts cfg_type,r_rwbyte
-
-h_fwconfiginfo_selcfg:
-	; select config typ
-	lds r_temp,cfg_type
-	; is type 1?
-	cpi r_temp, 1
-	brne h_fwconfiginfo_defcfg
-	; yes, custom config
+	brne 1f
+	sts  cfg_type,r_rwbyte
+1:	lds  r_temp,cfg_type
+	cpi  r_temp,CC_TEST
+	breq h_fwwriteconfig_cmd
+	cpi  r_temp,CC_BL_ENTER
+	breq h_fwwriteconfig_cmd
+	cpi  r_temp,CC_RESERVED_END
+	brsh h_fwconfiginfo_defcfg
+	cpi  r_temp,CC_DEFAULT
+	breq h_fwconfiginfo_defcfg
+	cpi  r_temp,CC_CUSTOM
+	breq h_fwwriteconfig_custom
+	; reserved: nothing stored, no request
+	rjmp handle_end_sleep
+h_fwwriteconfig_custom:
+#ifdef TIMER_SUPPORT
 	configZ cfg_custom1,r_bytep
 	rjmp h_fwconfiginfo_customcfg
+#else
+	rjmp h_fwconfiginfo_defcfg
 #endif
+h_fwwriteconfig_cmd:
+	; complete after its CFG_CMD_LEN bytes, config_info untouched
+	configZ cfg_cmd,r_bytep
+	st   Z,r_rwbyte
+	cpi  r_bytep,CFG_CMD_LEN-1
+	breq h_writeconfig_all
+	rjmp handle_end_inc
 h_fwconfiginfo_defcfg:
 	configZ config_info,r_bytep
 h_fwconfiginfo_customcfg:
@@ -336,8 +352,7 @@ h_fwconfiginfo_customcfg:
 	breq h_writeconfig_all
 	rjmp handle_end_inc
 h_writeconfig_all:
-	ldi r_temp,16
-	sts gcontrol,r_temp
+	gcset r_temp,0x10
 	rjmp handle_end_sleep
 
 ;---------------------------------------------------

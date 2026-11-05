@@ -143,8 +143,7 @@ h_convertcrc1:
 	ldi r_mode,OW_CONVERT_CRC2
 	rjmp handle_end
 h_convertcrc2:
-	ldi r_temp,0x20
-	sts gcontrol,r_temp
+	gcset r_temp,0x20
 	;ldi r_bcount,1
 	ldi r_mode,OW_CONVERT_CONV
 	;clr r_sendflag
