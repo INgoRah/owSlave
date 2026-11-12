@@ -205,9 +205,10 @@
 #define CFG_OUT_HIGH 0x22
 #define CFG_OUT_PWM 0x23
 
-#define CFG_CFG_FEAT 19
+#define CFG_FEAT_ID 19
 #define FEAT_TEMP 0x01
 #define FEAT_ADC_LIGHT 0x02
+#define FEAT_TIMER 0x04
 
 #define CFG_OFFSET 20
 
@@ -278,6 +279,9 @@
 #define CFG_CUSTOM1_SWA0 7 /* .. SWA7 = 14*/
 /* Not yet supported */
 #define CFG_CUSTOM1_SWB0 CFG_CUSTOM1_SWA0 + 8
+/* bytes of cfg_custom1 in EEPROM, = CFG_CUSTOM1_LEN in OWConfig.s.
+   In RAM one more: byte 22 of a config write (type 1), 0x55 saves */
+#define CFG_CUSTOM1_LEN 22
 
 typedef union {
 	volatile uint8_t bytes[0x20];
