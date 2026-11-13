@@ -214,6 +214,7 @@
 #define FEAT_TEMP 0x01
 #define FEAT_ADC_LIGHT 0x02
 #define FEAT_TIMER 0x04
+#define FEAT_BL 0x08
 
 #define CFG_OFFSET 20
 
@@ -289,6 +290,24 @@
 /* bytes of cfg_custom1 in EEPROM, = CFG_CUSTOM1_LEN in OWConfig.s.
    In RAM one more: byte 22 of a config write (type 1), 0x55 saves */
 #define CFG_CUSTOM1_LEN 22
+
+/* Config control: byte 0 of a config write (0x86) tells what it is,
+   = CC_xxx in OWConfig.s, see README "Config control" */
+/* config_info, so do all values not below */
+#define CC_DEFAULT 0x00
+/* cfg_custom1 (TIMER_SUPPORT) */
+#define CC_CUSTOM 0x01
+/* config_info2, set by its own write command (dual ROM) */
+#define CC_INFO2 0x02
+/* 0x02 .. CC_RESERVED_END - 1 reserved: ignored */
+#define CC_RESERVED_END 0x10
+/* control commands of CFG_CMD_LEN bytes, into cfg_cmd: config_info
+   is not touched, acted on after the last of them */
+/* bootloader: CC_BL_ENTER BL_ENTER_KEY ~BL_ENTER_KEY */
+#define CC_BL_ENTER 0xB0
+/* tests: CC_TEST 0xAD op, op see test_cmd() */
+#define CC_TEST 0xDE
+#define CFG_CMD_LEN 3
 
 typedef union {
 	volatile uint8_t bytes[0x20];
