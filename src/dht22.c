@@ -5,6 +5,7 @@
  *  MIT license, all text above must be included in any redistribution
  */
 #include "Arduino.h"
+#include "dht22.h"
 
 #ifdef DHT22_SUPPORT
 
@@ -24,7 +25,7 @@ uint8_t cycles[80];
 // in the very latest IDE versions):
 //   https://github.com/arduino/Arduino/blob/master/hardware/arduino/avr/cores/arduino/wiring_pulse.c
 #define MAXCYCLES 250
-uint8_t expectPulse(uint8_t level)
+static uint8_t expectPulse(uint8_t level)
 {
 	uint16_t count = 0;
 	uint8_t portState = level ? _BV(PINDHT) : 0;
