@@ -8,6 +8,45 @@ License GPL v3
 
 ## Changes
 Version 1.9, 2025-12-18
+- Decreased button press min times
+- DS1820: no periodic measurement by the watchdog timer any more. The
+  temperature is measured on the master's Convert T (and once after
+  start), like a real DS18x20; the master polls, e.g. once a minute.
+  The watchdog is a watchdog again for these builds as well
+  (WDT_ENABLED), the ADC averaging takes its 4 samples at once.
+- DS1820 (dual ROM): Skip ROM + Convert T (CC 44) starts the
+  measurement of all sensors on the bus at once. Other commands after
+  Skip ROM are ignored.
+- Buttons: the release after a long press is reported with at least
+  11 (352 ms) as press time. The device sleeps once the long press is
+  signaled and millis() stands still, the master (> 350 ms) took the
+  release for a short press. A short press never reports 0 (that is
+  the long press started), the press time is capped at 0xfe.
+- Bootloader on long lines, as the application does it: a 0 sent is
+  pulled low within a few cycles of the master's fall (was 2..3 us,
+  against the master's active pullup) and held 50 us (OWT_WRITE, was
+  30 us). With several devices on a long line the bits sent got lost
+  (the INFO answer garbled, "no bootloader answers" in in10dfs).
+- Bootloader: works with the slots of the DS2482 on a loaded line. In
+  a write 0 slot the DS2482 keeps the line low for 64 us and starts
+  the next slot 5.25 us later; the bootloader waited for the line to
+  be high for 2..3 us first (against ringing), with the rise time of a
+  long line that was missed and the next slot with it - all bits
+  shifted, no answer (INFO all ff) or a wrong CRC. The falling edge is
+  now taken from the edge flag of INT0 (polled, no interrupt), as the
+  application does by its interrupt: seen however short the high was.
+  Against ringing a fall starts a slot only if the line is low again
+  2..4 us later, falls up to 25 us after it are part of the same slot.
+- Bootloader: a 0 sent is held 40 us (was 50): with the RC oscillator
+  10 % slow the work between two bytes did not fit before the next
+  slot. The CRC16 is updated a bit at a time in its slot.
+- Bootloader: the result of a page write is sent from the start of a
+  byte of the master (page 0 of the ATtinys takes 18 ms, the master is
+  reading by then), the presence pulse of another device lasting
+  longer than its own is not taken for the next reset.
+- ATmega: INT0 is set to low level before power down (ISC01 is in EICRA,
+  not MCUCR as on the ATtinys): with the falling edge the device did not
+  wake up from power down by the bus.
 - Fix a bug, when the watchdog fires after any left over 1-wire activity (which is
   still in spec).
   This is solved with that soft watchdog timer of 1 second.
@@ -97,6 +136,7 @@ Version 1.1
   See eeprom.py script
 
   ### Configuration Definition
+  CFG [0] config control, see below; reads 0xff
   CFG [1] default 0xff unused
   CFG [2] default 0xff unused
   SWx  [3..10]
@@ -113,6 +153,67 @@ Version 1.1
   Reserved [20]
   Version [21..22]
   Type [23]
+
+  ### Config control
+  Byte 0 of a config write (0x86) tells what the write is (CC_xxx in
+  DS2408.h):
+
+  Byte 0 | Write | Done after
+  -------- | -------- | --------
+  0x00, 0xff, 0x10 .. 0xff not below | config_info, saved with Version = 0x55 | 23 bytes
+  0x01 | custom config (cfg_custom1, TIMER_SUPPORT), saved with byte 22 = 0x55 | 23 bytes
+  0x02 | config_info2 (dual ROM), by its own write command for now | 23 bytes
+  0x03 .. 0x0f | reserved, ignored | -
+  0xB0 | bootloader: `B0 07 F8` (BL_ENTER_KEY and its complement) | 3 bytes
+  0xDE | test: `DE AD op`, op 0x01 soft reset, 0x02 soft then hard reset, 0xff hard reset | 3 bytes
+
+  The commands (0xB0, 0xDE) do not touch config_info, the bytes after
+  the third are ignored. A config read starts with 0xff, written back
+  as it is it is a plain config write.
+
+## 1-Wire bootloader (ATmega88, ATmega168, ATtiny84, ATtiny85)
+
+`bootloader/` is a bootloader for a firmware update over the 1-Wire bus
+(in10dfs: write the image to `<rom>/firmware`), protocol in
+`include/owbootloader.h`. It answers with the device's own ROM (from
+the EEPROM). After a reset it starts the application at once, unless
+the application asked for the update (config write `0xB0 0x07 0xF8`,
+see "Config control", it jumps to the bootloader with BL_MAGIC in r24:r25) or there is
+no valid application. Without anything to do for a minute it starts
+the application again. An update broken off leaves no application:
+the device stays in its bootloader, the update can be done again.
+
+| | bootloader | application | fuses |
+|---|---|---|---|
+| ATmega88 | boot section, 2 KB at 0x1800 | 6144 bytes | efuse 0xF8: BOOTSZ 1024 words, BOOTRST |
+| ATmega168 | boot section, 2 KB at 0x3800 | 14336 bytes | efuse 0xF8: BOOTSZ 1024 words, BOOTRST |
+| ATtiny84/85 | 1600 bytes at 0x19C0 | 6592 bytes | efuse 0xFE: SELFPRGEN |
+
+The ATtinys have no boot section: reset always starts at 0. Writing
+page 0 the bootloader puts its own reset vector there and keeps the
+application's on the last page of the flash, to start it by; a read
+of page 0 gives the page as written. On the ATtiny85, without a 16 bit
+timer, Timer0 is extended to 16 bit in software.
+
+The environments: `atmega88`, `atmega168`, `attiny84-bl`, `attiny85-bl` for the
+application (`-DBL_SUPPORT`), `<mcu>-boot` for the bootloader. By ISP,
+once, the fuses and both together - an ISP upload erases the chip, the
+upload of `<mcu>-boot` writes the application as well:
+
+```sh
+pio run -e attiny84-bl && pio run -e attiny84-boot -t fuses -t upload
+```
+
+`-t fuses` erases the chip, so only with the upload. Afterwards the
+application is updated over the bus.
+
+`test/bootloader/run.sh [mcu ...]` runs bootloader and application in
+simavr against a 1-Wire master with the timing of a DS2482: into the
+bootloader (on the ATtinys made by the test, simavr does not run the
+application's 1-Wire there), INFO, Read and Search ROM, page writes, an
+update as in10dfs does it, a reset in the middle of it, back to the new
+application and in once more. It needs the simavr headers (libsimavr-dev,
+or SIMAVR_INC).
 
 ## Custom timer command
 

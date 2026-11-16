@@ -74,8 +74,25 @@
 
 /* = CFG_CUSTOM1_LEN in DS2408.h, cfg_custom1 has one more byte in RAM */
 #define CFG_CUSTOM1_LEN 22
+/* config control, byte 0 of a config write (0x86), = CC_xxx in DS2408.h */
+#define CC_DEFAULT 0x00
+#define CC_CUSTOM 0x01
+#define CC_INFO2 0x02
+#define CC_RESERVED_END 0x10
+#define CC_BL_ENTER 0xB0
+#define CC_TEST 0xDE
+/* bytes of a control command (CC_BL_ENTER, CC_TEST), = CFG_CMD_LEN */
+#define CFG_CMD_LEN 3
 /* = size of config_info2 in DS2408.c */
 #define CFG_INFO2_LEN 8
+
+/* sets bits in gcontrol, keeping the requests the main loop has not
+   taken yet; reg is clobbered, an upper register (ori) */
+.macro gcset reg,bits
+	lds  \reg,gcontrol
+	ori  \reg,\bits
+	sts  gcontrol,\reg
+.endm
 
 .macro configZ m,offs
 	ldi  zl,lo8(\m)       

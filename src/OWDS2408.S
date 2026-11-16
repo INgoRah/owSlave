@@ -31,6 +31,11 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define _ZERO_POLLING_
+#if defined(DS1820_SUPPORT) && defined(DUAL_ROM)
+/* Skip ROM (0xCC) with Convert T (0x44): all DS18x20 measure at once,
+   see h_readcommand12 in DS1820.s */
+#define _HANDLE_CC_COMMAND_
+#endif
 
 #include "../include/OWConfig.s"
 #include "../include/OWCRC8_16.s"
@@ -229,12 +234,10 @@ h_readpioregcrc2: ; 2. CRC Byte gesendet
 hrc_readchanel:
 	ldi r_sendflag,1 ;jetzt sendet der Slave zum Master
 	ldi r_mode,OW_READ_CHANEL
-	ldi r_temp,8
-	sts gcontrol,r_temp
+	gcset r_temp,8
 	rjmp h_readchanel1
 h_readchanel:
-	ldi r_temp,4
-	sts gcontrol,r_temp
+	gcset r_temp,4
 h_readchanel1:
 	cpi r_bytep,31
 	brge h_readchanelcrc1
@@ -268,8 +271,7 @@ h_writecomchanel:
 	rjmp handle_end_sleep
 h_writeok:
 	sts pack+1,r_rwbyte
-	ldi r_temp2,1
-	sts gcontrol,r_temp2
+	gcset r_temp2,1
 	clr r_sendflag
 	ldi r_rwbyte,0xAA
 	ldi r_mode,OW_WRITE_SENDAA
@@ -294,8 +296,7 @@ hrc_reset_activity:
 	lds r_temp,pack+5
 	andi r_temp,0x88
 	sts pack+5,r_temp
-	ldi r_temp,2
-	sts gcontrol,r_temp
+	gcset r_temp,2
 	ldi r_rwbyte,0xAA
 	ldi r_mode,OW_RESET_ACTIVITY
 	ldi r_sendflag,1 ;jetzt sendet der Slave zum Master
@@ -346,8 +347,7 @@ h_pintimer_sendack:
 	lds r_temp,crc16+1
 	com r_temp
 	sts crcsave,r_temp
-	ldi r_temp,0x40
-	sts gcontrol,r_temp
+	gcset r_temp,0x40
 	ldi r_mode,OW_PIN_TIMER_CRC1
 	ldi r_sendflag,1 ; now slave is transmitting
 	rjmp handle_end

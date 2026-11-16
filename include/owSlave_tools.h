@@ -1,13 +1,25 @@
 #ifndef OWSLAVE_TOOLS_H
 #define OWSLAVE_TOOLS_H
 
+#include <util/atomic.h>
+
 extern uint8_t mode;
-extern uint8_t gcontrol;
+/* requests of the 1-Wire interrupt to the main loop, one bit each, set
+   by gcset (OWConfig.s) while the main loop runs */
+extern volatile uint8_t gcontrol;
 extern uint8_t reset_indicator;
 extern uint8_t alarmflag;
 #ifdef DUAL_ROM
 extern uint8_t alarmflag2;
 #endif
+/* takes requests: cleared before acting on them, a new one meanwhile
+   sets its bit again */
+static inline void gcontrol_clr(uint8_t bits)
+{
+	ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+		gcontrol &= ~bits;
+	}
+}
 extern void OWINIT(void);
 extern void EXTERN_SLEEP(void);
 
@@ -144,6 +156,10 @@ ISR(WATCHDOG_vect) {/*	#else ISR(WDT_vect) {		#endif*/\
 	PORTA|=0xFF;
 
 #define OWST_EN_PULLUP MCUCR &=~(1<<PUD); /*All Pins Pullup...*/
+
+/* INT0 low level: in power down only a level wakes up (the edge
+   detection needs the I/O clock); ISC01 is in EICRA on the ATmegas */
+#define CLEAR_FALLING_EDGE EICRA &= ~(1<<ISC01);
 
 #define OWST_WDT_ISR
 

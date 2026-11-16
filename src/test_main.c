@@ -116,7 +116,7 @@ int ll_btn_test();
 
 /* DUT functions */
 extern const uint8_t pio_map [];
-extern uint8_t gcontrol;
+extern volatile uint8_t gcontrol;
 extern unsigned long _ms;
 extern struct pinState btn[MAX_BTN];
 extern void setup();
